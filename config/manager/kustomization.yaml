@@ -6,3 +6,8 @@ images:
 - name: controller
   newName: asia-southeast1-docker.pkg.dev/df-infrastructure/kubewise-operator/operator
   newTag: v0.3.13
+patches:
+- path: image-pull-secret-patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager
