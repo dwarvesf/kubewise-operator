@@ -1,8 +1,8 @@
 # kubewise-operator
-// TODO(user): Add simple overview of use/purpose
+This project is designed to provide a Kubernetes operator framework that automates the deployment, management, and scaling of cloud cost optimization resources in a Kubernetes cluster.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Kubewise-operator helps users save costs by dynamically managing cloud resources related to Kubernetes workloads. This operator implements custom resource definitions (CRDs) to extend Kubernetes capabilities, making it easy to optimize workloads on various cloud providers.
 
 ## Getting Started
 
@@ -83,14 +83,21 @@ its dependencies.
 
 2. Using the installer
 
-Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.:
+Users can just run kubectl apply -f <URL for YAML BUNDLE> to install the project, i.e.: 
 
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/<org>/kubewise-operator/<tag or branch>/dist/install.yaml
 ```
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+To contribute to this project, please follow these guidelines:
+1. Fork the repository.
+2. Create a feature branch.
+3. Make your changes and commit them.
+4. Push your branch to GitHub.
+5. Create a pull request.
+
+For detailed information on contribution processes and coding standards, please refer to the CONTRIBUTING.md file (to be created).
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
@@ -111,4 +118,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
