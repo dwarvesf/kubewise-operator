@@ -1,0 +1,27 @@
+# permissions for end users to edit cloudcostoptimizers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: kubewise-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: cloudcostoptimizer-editor-role
+rules:
+- apiGroups:
+  - optimization.dwarvesf.com
+  resources:
+  - cloudcostoptimizers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - optimization.dwarvesf.com
+  resources:
+  - cloudcostoptimizers/status
+  verbs:
+  - get

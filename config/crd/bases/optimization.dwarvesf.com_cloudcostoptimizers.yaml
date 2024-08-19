@@ -1,0 +1,126 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: cloudcostoptimizers.optimization.dwarvesf.com
+spec:
+  group: optimization.dwarvesf.com
+  names:
+    kind: CloudCostOptimizer
+    listKind: CloudCostOptimizerList
+    plural: cloudcostoptimizers
+    singular: cloudcostoptimizer
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CloudCostOptimizer is the Schema for the cloudcostoptimizers
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: CloudCostOptimizerSpec defines the desired state of CloudCostOptimizer
+            properties:
+              analysisInterval:
+                description: AnalysisInterval specifies how often to run the optimization
+                  analysis
+                format: duration
+                type: string
+              automateOptimization:
+                description: AutomateOptimization specifies whether to automatically
+                  apply optimization recommendations
+                type: boolean
+              costSavingThreshold:
+                description: CostSavingThreshold specifies the minimum cost saving
+                  percentage to trigger an action
+                maximum: 100
+                minimum: 0
+                type: integer
+              discordConfig:
+                description: DiscordConfig specifies the configuration for Discord
+                  notifications
+                properties:
+                  webhookURL:
+                    description: WebhookURL is the Discord webhook URL for sending
+                      notifications
+                    type: string
+                required:
+                - webhookURL
+                type: object
+              namespaces:
+                description: Namespaces specifies the list of namespaces to monitor.
+                  If empty, all namespaces will be monitored.
+                items:
+                  type: string
+                type: array
+              prometheusConfig:
+                description: PrometheusConfig specifies the configuration for Prometheus
+                properties:
+                  historicalMetricDuration:
+                    description: HistoricalMetricDuration specifies the duration for
+                      historical metric analysis
+                    format: duration
+                    type: string
+                  serverAddress:
+                    description: ServerAddress is the address of the Prometheus server
+                    type: string
+                required:
+                - historicalMetricDuration
+                - serverAddress
+                type: object
+              targets:
+                description: Targets specifies the resources to analyze and optimize
+                items:
+                  type: string
+                type: array
+            required:
+            - analysisInterval
+            - targets
+            type: object
+          status:
+            description: CloudCostOptimizerStatus defines the observed state of CloudCostOptimizer
+            properties:
+              lastAnalysisTime:
+                description: LastAnalysisTime is the timestamp of the last optimization
+                  analysis
+                format: date-time
+                type: string
+              lastReconcileTime:
+                description: LastReconcileTime is the timestamp of the last optimization
+                  analysis
+                format: date-time
+                type: string
+              recommendations:
+                description: Recommendations contains the latest optimization recommendations
+                items:
+                  type: string
+                type: array
+              totalCostSavings:
+                description: TotalCostSavings represents the estimated total cost
+                  savings
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

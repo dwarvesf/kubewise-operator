@@ -1,0 +1,21 @@
+apiVersion: optimization.dwarvesf.com/v1alpha1
+kind: CloudCostOptimizer
+metadata:
+  labels:
+    app.kubernetes.io/name: kubewise-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: cloudcostoptimizer-sample
+spec:
+  analysisInterval: "1h"
+  targets:
+    - "pods"
+  automateOptimization: false
+  costSavingThreshold: 10
+  namespaces:
+    - "sentry-0"
+    - "*"
+  prometheusConfig:
+    serverAddress: "http://loki-prometheus-server.monitoring"
+    historicalMetricDuration: 6h
+  discordConfig:
+    webhookURL: discord_webhook_url
