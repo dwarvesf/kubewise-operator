@@ -2,8 +2,11 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -139,15 +142,35 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		recommendations = append(recommendations, podRecommendations...)
 	}
 
-	// Check if recommendations have already been sent recently
-	if len(recommendations) > 0 {
-		// Send recommendations to Discord
-		message := formatRecommendationsMessage(recommendations)
-		if err := discordService.SendMessage(message); err != nil {
-			logger.Error(err, "Failed to send Discord message")
+	// Sort recommendations to ensure consistent ordering
+	sort.SliceStable(recommendations, func(i, j int) bool {
+		return recommendations[i].PodName < recommendations[j].PodName
+	})
+
+	// Create a hash of the recommendations
+	newRecommendationsHash := hashRecommendations(recommendations)
+
+	// Compare the new hash with the stored hash
+	if newRecommendationsHash != cloudCostOptimizer.Status.RecommendationsHash {
+		// If there are changes, send recommendations to Discord
+		if len(recommendations) > 0 {
+			message := formatRecommendationsMessage(recommendations)
+			if err := discordService.SendMessage(message); err != nil {
+				logger.Error(err, "Failed to send Discord message", "message_length", len(message))
+			}
+		} else {
+			logger.Info("No resource optimization recommendations found")
+		}
+
+		// Update the status of the CloudCostOptimizer resource with new recommendations and hash
+		cloudCostOptimizer.Status.Recommendations = formatRecommendationsStatus(recommendations)
+		cloudCostOptimizer.Status.RecommendationsHash = newRecommendationsHash
+		if err := r.Status().Update(ctx, cloudCostOptimizer); err != nil {
+			logger.Error(err, "Failed to update CloudCostOptimizer status")
+			return ctrl.Result{}, err
 		}
 	} else {
-		logger.Info("No resource optimization recommendations found")
+		logger.Info("No changes in recommendations; skipping Discord notification")
 	}
 
 	// Update the status of the CloudCostOptimizer resource
@@ -158,6 +181,15 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	return ctrl.Result{RequeueAfter: cloudCostOptimizer.Spec.AnalysisInterval.Duration}, nil
+}
+
+// hashRecommendations creates a hash of the recommendations
+func hashRecommendations(recommendations []ResourceRecommendation) string {
+	hash := sha256.New()
+	for _, rec := range recommendations {
+		hash.Write([]byte(rec.Namespace + rec.PodName + rec.ContainerName)) // Include other relevant fields as needed
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // setupPrometheusClient initializes the Prometheus client using the provided configuration
@@ -210,6 +242,11 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 	for _, container := range pod.Spec.Containers {
 		logger.Info("Analyzing container", "container", container.Name)
 
+		const (
+			minCPU    = 50               // minimum CPU recommendation in milli-cores (50m)
+			minMemory = 64 * 1024 * 1024 // minimum Memory recommendation in bytes (64Mi)
+		)
+
 		cpuUsage, err := r.getHistoricalMetric(ctx, pod, "container_cpu_usage_seconds_total", prometheusClient, duration)
 		if err != nil {
 			logger.Error(err, "Failed to get CPU usage", "container", container.Name)
@@ -234,8 +271,27 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 
 		if cpuUsage < float64(cpuRequest.MilliValue())*0.5 || memoryUsage < float64(memoryRequest.Value())*0.5 {
 			// Calculate reduced resource requests based on the current usage
-			recommendedCPU := resource.NewMilliQuantity(int64(float64(cpuRequest.MilliValue())*0.8), resource.DecimalSI)
-			recommendedMemory := resource.NewQuantity(int64(float64(memoryRequest.Value())*0.8), resource.BinarySI)
+			recCPU := float64(cpuUsage/1000) * 3
+			if int(recCPU) == 0 {
+				recCPU = minCPU
+			} else if recCPU > float64(cpuRequest.MilliValue()) {
+				recCPU = float64(cpuUsage/1000) * 2
+				if recCPU > float64(cpuRequest.MilliValue()) {
+					recCPU = float64(cpuRequest.MilliValue())
+				}
+			}
+
+			recMemory := memoryUsage * 3
+			if int(recMemory) == 0 {
+				recMemory = minMemory
+			} else if recMemory > float64(memoryRequest.Value()) {
+				recMemory = memoryUsage * 2
+				if recMemory > float64(memoryRequest.Value()) {
+					recMemory = float64(memoryRequest.Value())
+				}
+			}
+			recommendedCPU := resource.NewMilliQuantity(int64(recCPU), resource.DecimalSI)
+			recommendedMemory := resource.NewQuantity(int64(recMemory), resource.BinarySI)
 
 			logger.Info("Generating recommendation",
 				"container", container.Name,
@@ -264,10 +320,10 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 	return recommendations, nil
 }
 
-// formatRecommendationsMessage formats the recommendations for Discord message
+// formatRecommendationsMessage formats the recommendations for a Discord message
 func formatRecommendationsMessage(recommendations []ResourceRecommendation) string {
 	var sb strings.Builder
-	sb.WriteString("**Resource Optimization Recommendations:**\n\n")
+	sb.WriteString("**Resource Optimization Recommendations**\n\n")
 
 	// Group recommendations by namespace and pod
 	groupedRecs := make(map[string]map[string][]ResourceRecommendation)
@@ -279,21 +335,19 @@ func formatRecommendationsMessage(recommendations []ResourceRecommendation) stri
 	}
 
 	for namespace, pods := range groupedRecs {
-		sb.WriteString(fmt.Sprintf("Namespace: **%s**\n", namespace))
+		sb.WriteString(fmt.Sprintf("**Namespace:** %s\n", namespace))
 		for podName, recs := range pods {
-			sb.WriteString(fmt.Sprintf("  Pod: **%s**\n", podName))
+			sb.WriteString(fmt.Sprintf("Pod: %s\n", podName))
 			for _, rec := range recs {
-				sb.WriteString(fmt.Sprintf("    Container: **%s**\n", rec.ContainerName))
-				sb.WriteString(fmt.Sprintf("      CPU: %s -> %s (Usage: %s)\n",
+				sb.WriteString(fmt.Sprintf("  [%s] CPU: %s -> %s (Usage: %s) | Mem: %s -> %s (Usage: %s)\n",
+					rec.ContainerName,
 					formatResourceValue(rec.CurrentRequestsCPU),
 					formatResourceValue(rec.RecommendedCPU),
-					formatResourceValue(rec.UsageCPU)))
-				sb.WriteString(fmt.Sprintf("      Memory: %s -> %s (Usage: %s)\n",
+					formatResourceValue(rec.UsageCPU),
 					formatResourceValue(rec.CurrentRequestsMemory),
 					formatResourceValue(rec.RecommendedMemory),
 					formatResourceValue(rec.UsageMemory)))
 			}
-			sb.WriteString("\n")
 		}
 		sb.WriteString("\n")
 	}

@@ -64,13 +64,17 @@ type CloudCostOptimizerStatus struct {
 	// +optional
 	LastAnalysisTime metav1.Time `json:"lastAnalysisTime,omitempty"`
 
-	// LastReconcileTime is the timestamp of the last optimization analysis
+	// LastReconcileTime is the timestamp of the last reconciliation
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
 
 	// Recommendations contains the latest optimization recommendations
 	// +optional
 	Recommendations []string `json:"recommendations,omitempty"`
+
+	// RecommendationsHash contains the hash of the latest optimization recommendations
+	// +optional
+	RecommendationsHash string `json:"recommendationsHash,omitempty"`
 
 	// TotalCostSavings represents the estimated total cost savings
 	// +optional

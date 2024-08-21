@@ -105,8 +105,7 @@ spec:
                 format: date-time
                 type: string
               lastReconcileTime:
-                description: LastReconcileTime is the timestamp of the last optimization
-                  analysis
+                description: LastReconcileTime is the timestamp of the last reconciliation
                 format: date-time
                 type: string
               recommendations:
@@ -114,6 +113,10 @@ spec:
                 items:
                   type: string
                 type: array
+              recommendationsHash:
+                description: RecommendationsHash contains the hash of the latest optimization
+                  recommendations
+                type: string
               totalCostSavings:
                 description: TotalCostSavings represents the estimated total cost
                   savings
