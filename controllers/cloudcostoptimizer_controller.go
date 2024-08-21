@@ -272,7 +272,7 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 		if cpuUsage < float64(cpuRequest.MilliValue())*0.5 || memoryUsage < float64(memoryRequest.Value())*0.5 {
 			// Calculate reduced resource requests based on the current usage
 			recCPU := float64(cpuUsage/1000) * 3
-			if int(recCPU) == 0 {
+			if int(recCPU) < minCPU {
 				recCPU = minCPU
 			} else if recCPU > float64(cpuRequest.MilliValue()) {
 				recCPU = float64(cpuUsage/1000) * 2
@@ -282,7 +282,7 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 			}
 
 			recMemory := memoryUsage * 3
-			if int(recMemory) == 0 {
+			if int(recMemory) < minMemory {
 				recMemory = minMemory
 			} else if recMemory > float64(memoryRequest.Value()) {
 				recMemory = memoryUsage * 2
