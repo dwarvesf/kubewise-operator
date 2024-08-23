@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MaxMessageLength = 2000 // Discord's maximum message length
+	MaxMessageLength = 1800 // Discord's maximum message length
 )
 
 // EmbedField represents a field in the embed

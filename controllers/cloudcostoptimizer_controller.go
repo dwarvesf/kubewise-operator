@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -25,8 +24,6 @@ import (
 	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
 	"github.com/dwarvesf/cloud-cost-optimizer/internal/discord"
 )
-
-var mutex sync.Mutex
 
 // CloudCostOptimizerReconciler reconciles a CloudCostOptimizer object
 type CloudCostOptimizerReconciler struct {
@@ -144,7 +141,7 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Sort recommendations to ensure consistent ordering
 	sort.SliceStable(recommendations, func(i, j int) bool {
-		return recommendations[i].PodName < recommendations[j].PodName
+		return recommendations[i].Namespace+recommendations[i].PodName+recommendations[i].ContainerName < recommendations[j].Namespace+recommendations[j].PodName+recommendations[j].ContainerName
 	})
 
 	// Create a hash of the recommendations
@@ -187,7 +184,12 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 func hashRecommendations(recommendations []ResourceRecommendation) string {
 	hash := sha256.New()
 	for _, rec := range recommendations {
-		hash.Write([]byte(rec.Namespace + rec.PodName + rec.ContainerName)) // Include other relevant fields as needed
+		hashString := fmt.Sprintf("%s:%s:%s",
+			rec.Namespace,
+			rec.PodName,
+			rec.ContainerName,
+		)
+		hash.Write([]byte(hashString))
 	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
@@ -383,7 +385,7 @@ func (r *CloudCostOptimizerReconciler) getHistoricalMetric(ctx context.Context, 
 	query := fmt.Sprintf("avg_over_time(%s{pod=\"%s\",namespace=\"%s\"}[%s])", metric, pod.Name, pod.Namespace, duration.String())
 	result, warnings, err := prometheusClient.Query(ctx, query, time.Now())
 	if err != nil {
-		return 0, fmt.Errorf("Prometheus query failed: %v", err)
+		return 0, fmt.Errorf("prometheus query failed: %v", err)
 	}
 	if len(warnings) > 0 {
 		log.FromContext(ctx).Info("Prometheus query returned warnings", "warnings", warnings)
