@@ -141,7 +141,7 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Sort recommendations to ensure consistent ordering
 	sort.SliceStable(recommendations, func(i, j int) bool {
-		return recommendations[i].Namespace+recommendations[i].PodName+recommendations[i].ContainerName < recommendations[j].Namespace+recommendations[j].PodName+recommendations[j].ContainerName
+		return recommendations[i].Namespace+recommendations[i].PodName < recommendations[j].Namespace+recommendations[j].PodName
 	})
 
 	// Create a hash of the recommendations
@@ -184,10 +184,9 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 func hashRecommendations(recommendations []ResourceRecommendation) string {
 	hash := sha256.New()
 	for _, rec := range recommendations {
-		hashString := fmt.Sprintf("%s:%s:%s",
+		hashString := fmt.Sprintf("%s:%s",
 			rec.Namespace,
 			rec.PodName,
-			rec.ContainerName,
 		)
 		hash.Write([]byte(hashString))
 	}
@@ -271,9 +270,11 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 			"memoryUsage", memoryUsage,
 			"memoryRequest", memoryRequest.Value())
 
+		recCPU := float64(cpuUsage/1000) * 3
+		recMemory := memoryUsage * 3
+
 		if cpuUsage < float64(cpuRequest.MilliValue())*0.5 || memoryUsage < float64(memoryRequest.Value())*0.5 {
 			// Calculate reduced resource requests based on the current usage
-			recCPU := float64(cpuUsage/1000) * 3
 			if int(recCPU) < minCPU {
 				recCPU = minCPU
 			} else if recCPU > float64(cpuRequest.MilliValue()) {
@@ -283,7 +284,6 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 				}
 			}
 
-			recMemory := memoryUsage * 3
 			if int(recMemory) < minMemory {
 				recMemory = minMemory
 			} else if recMemory > float64(memoryRequest.Value()) {
