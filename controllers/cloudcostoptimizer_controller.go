@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -104,10 +105,39 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 			return ctrl.Result{}, err
 		}
 	} else if len(cloudCostOptimizer.Spec.Namespaces) > 0 {
-		// Otherwise, list pods for each specified namespace
-		var allPods []corev1.Pod
+		// Compile regex patterns for namespace matching
+		var regexPatterns []*regexp.Regexp
 		for _, ns := range cloudCostOptimizer.Spec.Namespaces {
-			logger.Info("Adding namespace to list options", "namespace", ns)
+			pattern, err := regexp.Compile(ns)
+			if err != nil {
+				logger.Error(err, "Invalid regex pattern", "pattern", ns)
+				continue
+			}
+			regexPatterns = append(regexPatterns, pattern)
+		}
+
+		// List all namespaces
+		var namespaceList corev1.NamespaceList
+		if err := r.List(ctx, &namespaceList); err != nil {
+			logger.Error(err, "Failed to list namespaces")
+			return ctrl.Result{}, err
+		}
+
+		// Filter namespaces based on regex patterns
+		var matchedNamespaces []string
+		for _, ns := range namespaceList.Items {
+			for _, pattern := range regexPatterns {
+				if pattern.MatchString(ns.Name) {
+					matchedNamespaces = append(matchedNamespaces, ns.Name)
+					break
+				}
+			}
+		}
+
+		// List pods for each matched namespace
+		var allPods []corev1.Pod
+		for _, ns := range matchedNamespaces {
+			logger.Info("Listing pods in namespace", "namespace", ns)
 			namespaceOpts := append(listOpts, client.InNamespace(ns))
 			var namespacePodList corev1.PodList
 			if err := r.List(ctx, &namespacePodList, namespaceOpts...); err != nil {
