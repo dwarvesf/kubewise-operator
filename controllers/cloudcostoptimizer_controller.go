@@ -15,7 +15,7 @@ import (
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource" // Add this line to import the missing package
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -48,7 +48,7 @@ type ResourceRecommendation struct {
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -84,13 +84,63 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Initialize Discord service
 	discordService := discord.NewDiscordService(cloudCostOptimizer.Spec.DiscordConfig.WebhookURL)
 
-	// List all pods in the cluster
+	allRecommendations := []ResourceRecommendation{}
+
+	// Iterate through each target
+	for _, target := range cloudCostOptimizer.Spec.Targets {
+		targetRecommendations, err := r.analyzeTarget(ctx, target, prometheusClient, cloudCostOptimizer.Spec.PrometheusConfig.HistoricalMetricDuration.Duration)
+		if err != nil {
+			logger.Error(err, "Failed to analyze target", "target", target)
+			continue
+		}
+		allRecommendations = append(allRecommendations, targetRecommendations...)
+	}
+
+	// Sort recommendations to ensure consistent ordering
+	sort.SliceStable(allRecommendations, func(i, j int) bool {
+		return allRecommendations[i].Namespace+allRecommendations[i].PodName < allRecommendations[j].Namespace+allRecommendations[j].PodName
+	})
+
+	// Create a hash of the recommendations
+	newRecommendationsHash := hashRecommendations(allRecommendations)
+
+	// Compare the new hash with the stored hash
+	if newRecommendationsHash != cloudCostOptimizer.Status.RecommendationsHash {
+		// If there are changes, send recommendations to Discord
+		if len(allRecommendations) > 0 {
+			message := formatRecommendationsMessage(allRecommendations)
+			if err := discordService.SendMessage(message); err != nil {
+				logger.Error(err, "Failed to send Discord message", "message_length", len(message))
+			}
+		} else {
+			logger.Info("No resource optimization recommendations found")
+		}
+
+		// Update the status of the CloudCostOptimizer resource with new recommendations and hash
+		cloudCostOptimizer.Status.Recommendations = formatRecommendationsStatus(allRecommendations)
+		cloudCostOptimizer.Status.RecommendationsHash = newRecommendationsHash
+		if err := r.Status().Update(ctx, cloudCostOptimizer); err != nil {
+			logger.Error(err, "Failed to update CloudCostOptimizer status")
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.Info("No changes in recommendations; skipping Discord notification")
+	}
+
+	return ctrl.Result{RequeueAfter: cloudCostOptimizer.Spec.AnalysisInterval.Duration}, nil
+}
+
+func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target optimizationv1alpha1.Target, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {
+	logger := log.FromContext(ctx)
+	var recommendations []ResourceRecommendation
+
+	// List all pods in the target namespaces
 	var podList corev1.PodList
 	listOpts := []client.ListOption{}
 
 	// Check if the namespace list contains "*", which means all namespaces
 	applyToAllNamespaces := false
-	for _, ns := range cloudCostOptimizer.Spec.Namespaces {
+	for _, ns := range target.Namespaces {
 		if ns == "*" {
 			applyToAllNamespaces = true
 			break
@@ -102,12 +152,12 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Info("Applying to all namespaces")
 		if err := r.List(ctx, &podList, listOpts...); err != nil {
 			logger.Error(err, "Failed to list pods in all namespaces")
-			return ctrl.Result{}, err
+			return nil, err
 		}
-	} else if len(cloudCostOptimizer.Spec.Namespaces) > 0 {
+	} else if len(target.Namespaces) > 0 {
 		// Compile regex patterns for namespace matching
 		var regexPatterns []*regexp.Regexp
-		for _, ns := range cloudCostOptimizer.Spec.Namespaces {
+		for _, ns := range target.Namespaces {
 			pattern, err := regexp.Compile(ns)
 			if err != nil {
 				logger.Error(err, "Invalid regex pattern", "pattern", ns)
@@ -120,7 +170,7 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		var namespaceList corev1.NamespaceList
 		if err := r.List(ctx, &namespaceList); err != nil {
 			logger.Error(err, "Failed to list namespaces")
-			return ctrl.Result{}, err
+			return nil, err
 		}
 
 		// Filter namespaces based on regex patterns
@@ -142,7 +192,7 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 			var namespacePodList corev1.PodList
 			if err := r.List(ctx, &namespacePodList, namespaceOpts...); err != nil {
 				logger.Error(err, "Failed to list pods in namespace", "namespace", ns)
-				return ctrl.Result{}, err
+				return nil, err
 			}
 			allPods = append(allPods, namespacePodList.Items...)
 		}
@@ -152,62 +202,51 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		logger.Info("Listing all pods in the cluster")
 		if err := r.List(ctx, &podList, listOpts...); err != nil {
 			logger.Error(err, "Failed to list pods")
-			return ctrl.Result{}, err
+			return nil, err
 		}
 	}
-
-	recommendations := []ResourceRecommendation{}
 
 	// Analyze each pod for potential waste and generate recommendations
 	for _, pod := range podList.Items {
 		logger.Info("Analyzing pod", "pod", pod.Name)
-		podRecommendations, err := r.analyzePodResources(ctx, &pod, prometheusClient, cloudCostOptimizer.Spec.PrometheusConfig.HistoricalMetricDuration.Duration)
+		podRecommendations, err := r.analyzePodResources(ctx, &pod, prometheusClient, duration)
 		if err != nil {
 			logger.Error(err, "Failed to analyze pod", "pod", pod.Name)
 			continue
 		}
 		recommendations = append(recommendations, podRecommendations...)
-	}
 
-	// Sort recommendations to ensure consistent ordering
-	sort.SliceStable(recommendations, func(i, j int) bool {
-		return recommendations[i].Namespace+recommendations[i].PodName < recommendations[j].Namespace+recommendations[j].PodName
-	})
-
-	// Create a hash of the recommendations
-	newRecommendationsHash := hashRecommendations(recommendations)
-
-	// Compare the new hash with the stored hash
-	if newRecommendationsHash != cloudCostOptimizer.Status.RecommendationsHash {
-		// If there are changes, send recommendations to Discord
-		if len(recommendations) > 0 {
-			message := formatRecommendationsMessage(recommendations)
-			if err := discordService.SendMessage(message); err != nil {
-				logger.Error(err, "Failed to send Discord message", "message_length", len(message))
+		// Check if automateOptimization is enabled for this target
+		if target.AutomateOptimization {
+			if err := r.applyOptimization(ctx, &pod, podRecommendations); err != nil {
+				logger.Error(err, "Failed to apply optimization", "pod", pod.Name)
 			}
-		} else {
-			logger.Info("No resource optimization recommendations found")
 		}
-
-		// Update the status of the CloudCostOptimizer resource with new recommendations and hash
-		cloudCostOptimizer.Status.Recommendations = formatRecommendationsStatus(recommendations)
-		cloudCostOptimizer.Status.RecommendationsHash = newRecommendationsHash
-		if err := r.Status().Update(ctx, cloudCostOptimizer); err != nil {
-			logger.Error(err, "Failed to update CloudCostOptimizer status")
-			return ctrl.Result{}, err
-		}
-	} else {
-		logger.Info("No changes in recommendations; skipping Discord notification")
 	}
 
-	// Update the status of the CloudCostOptimizer resource
-	cloudCostOptimizer.Status.Recommendations = formatRecommendationsStatus(recommendations)
-	if err := r.Status().Update(ctx, cloudCostOptimizer); err != nil {
-		logger.Error(err, "Failed to update CloudCostOptimizer status")
-		return ctrl.Result{}, err
+	return recommendations, nil
+}
+
+// applyOptimization applies the recommended resource changes to the pod
+func (r *CloudCostOptimizerReconciler) applyOptimization(ctx context.Context, pod *corev1.Pod, recommendations []ResourceRecommendation) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Applying optimization", "pod", pod.Name)
+
+	for _, rec := range recommendations {
+		for i, container := range pod.Spec.Containers {
+			if container.Name == rec.ContainerName {
+				pod.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
+				pod.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
+				logger.Info("Updated container resources", "container", container.Name, "cpu", rec.RecommendedCPU, "memory", rec.RecommendedMemory)
+			}
+		}
 	}
 
-	return ctrl.Result{RequeueAfter: cloudCostOptimizer.Spec.AnalysisInterval.Duration}, nil
+	if err := r.Update(ctx, pod); err != nil {
+		return fmt.Errorf("failed to update pod: %v", err)
+	}
+
+	return nil
 }
 
 // hashRecommendations creates a hash of the recommendations

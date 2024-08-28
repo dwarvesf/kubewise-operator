@@ -8,12 +8,16 @@ metadata:
 spec:
   analysisInterval: "1h"
   targets:
-    - "pods"
-  automateOptimization: false
+    - resources: ["pods"]
+      namespaces: ["sentry-*"]
+      automateOptimization: true
+    - resources: ["pods"]
+      namespaces: ["default", "kube-system"]
+      automateOptimization: false
+    - resources: ["pods"]
+      namespaces: ["*"]
+      automateOptimization: false
   costSavingThreshold: 10
-  namespaces:
-    - "sentry-0"
-    - "*"
   prometheusConfig:
     serverAddress: "http://loki-prometheus-server.monitoring"
     historicalMetricDuration: 6h

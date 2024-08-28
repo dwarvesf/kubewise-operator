@@ -8,7 +8,7 @@ import (
 type CloudCostOptimizerSpec struct {
 	// Targets specifies the resources to analyze and optimize
 	// +kubebuilder:validation:Required
-	Targets []string `json:"targets"`
+	Targets []Target `json:"targets"`
 
 	// AnalysisInterval specifies how often to run the optimization analysis
 	// +kubebuilder:validation:Required
@@ -21,14 +21,6 @@ type CloudCostOptimizerSpec struct {
 	// +kubebuilder:validation:Maximum=100
 	CostSavingThreshold int `json:"costSavingThreshold,omitempty"`
 
-	// AutomateOptimization specifies whether to automatically apply optimization recommendations
-	// +optional
-	AutomateOptimization bool `json:"automateOptimization,omitempty"`
-
-	// Namespaces specifies the list of namespaces to monitor. If empty, all namespaces will be monitored.
-	// +optional
-	Namespaces []string `json:"namespaces,omitempty"`
-
 	// PrometheusConfig specifies the configuration for Prometheus
 	// +optional
 	PrometheusConfig PrometheusConfig `json:"prometheusConfig,omitempty"`
@@ -36,6 +28,21 @@ type CloudCostOptimizerSpec struct {
 	// DiscordConfig specifies the configuration for Discord notifications
 	// +optional
 	DiscordConfig DiscordConfig `json:"discordConfig,omitempty"`
+}
+
+// Target defines the resources and namespaces to analyze and optimize
+type Target struct {
+	// Resources specifies the types of resources to analyze and optimize
+	// +kubebuilder:validation:Required
+	Resources []string `json:"resources"`
+
+	// Namespaces specifies the list of namespaces to monitor
+	// +optional
+	Namespaces []string `json:"namespaces,omitempty"`
+
+	// AutomateOptimization specifies whether to automatically apply optimization recommendations
+	// +optional
+	AutomateOptimization bool `json:"automateOptimization,omitempty"`
 }
 
 // PrometheusConfig defines the configuration for Prometheus

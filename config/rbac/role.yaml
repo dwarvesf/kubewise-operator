@@ -12,6 +12,8 @@ rules:
   - get
   - list
   - watch
+  - update
+  - patch
 - apiGroups:
   - optimization.dwarvesf.com
   resources:
