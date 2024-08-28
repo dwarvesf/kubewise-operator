@@ -45,10 +45,6 @@ spec:
                   analysis
                 format: duration
                 type: string
-              automateOptimization:
-                description: AutomateOptimization specifies whether to automatically
-                  apply optimization recommendations
-                type: boolean
               costSavingThreshold:
                 description: CostSavingThreshold specifies the minimum cost saving
                   percentage to trigger an action
@@ -66,12 +62,6 @@ spec:
                 required:
                 - webhookURL
                 type: object
-              namespaces:
-                description: Namespaces specifies the list of namespaces to monitor.
-                  If empty, all namespaces will be monitored.
-                items:
-                  type: string
-                type: array
               prometheusConfig:
                 description: PrometheusConfig specifies the configuration for Prometheus
                 properties:
@@ -90,7 +80,28 @@ spec:
               targets:
                 description: Targets specifies the resources to analyze and optimize
                 items:
-                  type: string
+                  description: Target defines the resources and namespaces to analyze
+                    and optimize
+                  properties:
+                    automateOptimization:
+                      description: AutomateOptimization specifies whether to automatically
+                        apply optimization recommendations
+                      type: boolean
+                    namespaces:
+                      description: Namespaces specifies the list of namespaces to
+                        monitor
+                      items:
+                        type: string
+                      type: array
+                    resources:
+                      description: Resources specifies the types of resources to analyze
+                        and optimize
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - resources
+                  type: object
                 type: array
             required:
             - analysisInterval

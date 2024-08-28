@@ -5,7 +5,7 @@ kind: Kustomization
 images:
 - name: controller
   newName: asia-southeast1-docker.pkg.dev/df-infrastructure/kubewise-operator/operator
-  newTag: v0.3.29
+  newTag: v0.4.2
 patches:
 - path: image-pull-secret-patch.yaml
   target:

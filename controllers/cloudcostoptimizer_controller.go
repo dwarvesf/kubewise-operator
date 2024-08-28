@@ -14,10 +14,12 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -48,7 +50,9 @@ type ResourceRecommendation struct {
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+//+kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets;replicasets,verbs=get;list;watch;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -227,23 +231,115 @@ func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target
 	return recommendations, nil
 }
 
-// applyOptimization applies the recommended resource changes to the pod
+// applyOptimization applies the recommended resource changes to the Deployment, StatefulSet, or DaemonSet
 func (r *CloudCostOptimizerReconciler) applyOptimization(ctx context.Context, pod *corev1.Pod, recommendations []ResourceRecommendation) error {
 	logger := log.FromContext(ctx)
 	logger.Info("Applying optimization", "pod", pod.Name)
 
-	for _, rec := range recommendations {
-		for i, container := range pod.Spec.Containers {
+	// Check if the pod is owned by a Deployment, StatefulSet, or DaemonSet
+	for _, ownerRef := range pod.OwnerReferences {
+		switch ownerRef.Kind {
+		case "ReplicaSet":
+			// For Deployments, we need to find the Deployment that owns the ReplicaSet
+			var rs appsv1.ReplicaSet
+			if err := r.Get(ctx, types.NamespacedName{Name: ownerRef.Name, Namespace: pod.Namespace}, &rs); err != nil {
+				return fmt.Errorf("failed to get ReplicaSet: %v", err)
+			}
+			for _, rsOwnerRef := range rs.OwnerReferences {
+				if rsOwnerRef.Kind == "Deployment" {
+					return r.updateDeployment(ctx, pod.Namespace, rsOwnerRef.Name, recommendations)
+				}
+			}
+		case "StatefulSet":
+			return r.updateStatefulSet(ctx, pod.Namespace, ownerRef.Name, recommendations)
+		case "DaemonSet":
+			return r.updateDaemonSet(ctx, pod.Namespace, ownerRef.Name, recommendations)
+		}
+	}
+
+	logger.Info("Pod is not owned by a Deployment, StatefulSet, or DaemonSet. Skipping optimization.")
+	return nil
+}
+
+func (r *CloudCostOptimizerReconciler) updateDeployment(ctx context.Context, namespace, name string, recommendations []ResourceRecommendation) error {
+	var deployment appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &deployment); err != nil {
+		return fmt.Errorf("failed to get Deployment: %v", err)
+	}
+
+	updated := false
+	for i, container := range deployment.Spec.Template.Spec.Containers {
+		for _, rec := range recommendations {
 			if container.Name == rec.ContainerName {
-				pod.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
-				pod.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
-				logger.Info("Updated container resources", "container", container.Name, "cpu", rec.RecommendedCPU, "memory", rec.RecommendedMemory)
+				deployment.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
+				deployment.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
+				deployment.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
+				deployment.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceMemory] = *rec.RecommendedMemory
+				updated = true
 			}
 		}
 	}
 
-	if err := r.Update(ctx, pod); err != nil {
-		return fmt.Errorf("failed to update pod: %v", err)
+	if updated {
+		if err := r.Update(ctx, &deployment); err != nil {
+			return fmt.Errorf("failed to update Deployment: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *CloudCostOptimizerReconciler) updateStatefulSet(ctx context.Context, namespace, name string, recommendations []ResourceRecommendation) error {
+	var statefulSet appsv1.StatefulSet
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &statefulSet); err != nil {
+		return fmt.Errorf("failed to get StatefulSet: %v", err)
+	}
+
+	updated := false
+	for i, container := range statefulSet.Spec.Template.Spec.Containers {
+		for _, rec := range recommendations {
+			if container.Name == rec.ContainerName {
+				statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
+				statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
+				statefulSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
+				statefulSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceMemory] = *rec.RecommendedMemory
+				updated = true
+			}
+		}
+	}
+
+	if updated {
+		if err := r.Update(ctx, &statefulSet); err != nil {
+			return fmt.Errorf("failed to update StatefulSet: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *CloudCostOptimizerReconciler) updateDaemonSet(ctx context.Context, namespace, name string, recommendations []ResourceRecommendation) error {
+	var daemonSet appsv1.DaemonSet
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &daemonSet); err != nil {
+		return fmt.Errorf("failed to get DaemonSet: %v", err)
+	}
+
+	updated := false
+	for i, container := range daemonSet.Spec.Template.Spec.Containers {
+		for _, rec := range recommendations {
+			if container.Name == rec.ContainerName {
+				daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
+				daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
+				daemonSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
+				daemonSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceMemory] = *rec.RecommendedMemory
+				updated = true
+			}
+		}
+	}
+
+	if updated {
+		if err := r.Update(ctx, &daemonSet); err != nil {
+			return fmt.Errorf("failed to update DaemonSet: %v", err)
+		}
 	}
 
 	return nil
