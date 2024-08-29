@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -267,10 +268,19 @@ func (r *CloudCostOptimizerReconciler) updateDeployment(ctx context.Context, nam
 		return fmt.Errorf("failed to get Deployment: %v", err)
 	}
 
+	logger := log.FromContext(ctx)
+	logger.Info("Updating Deployment", "deployment", deployment.Name)
+
 	updated := false
 	for i, container := range deployment.Spec.Template.Spec.Containers {
 		for _, rec := range recommendations {
 			if container.Name == rec.ContainerName {
+				if deployment.Spec.Template.Spec.Containers[i].Resources.Requests == nil {
+					deployment.Spec.Template.Spec.Containers[i].Resources.Requests = corev1.ResourceList{}
+				}
+				if deployment.Spec.Template.Spec.Containers[i].Resources.Limits == nil {
+					deployment.Spec.Template.Spec.Containers[i].Resources.Limits = corev1.ResourceList{}
+				}
 				deployment.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
 				deployment.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
 				deployment.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
@@ -299,6 +309,12 @@ func (r *CloudCostOptimizerReconciler) updateStatefulSet(ctx context.Context, na
 	for i, container := range statefulSet.Spec.Template.Spec.Containers {
 		for _, rec := range recommendations {
 			if container.Name == rec.ContainerName {
+				if statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests == nil {
+					statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests = corev1.ResourceList{}
+				}
+				if statefulSet.Spec.Template.Spec.Containers[i].Resources.Limits == nil {
+					statefulSet.Spec.Template.Spec.Containers[i].Resources.Limits = corev1.ResourceList{}
+				}
 				statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
 				statefulSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
 				statefulSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
@@ -327,6 +343,12 @@ func (r *CloudCostOptimizerReconciler) updateDaemonSet(ctx context.Context, name
 	for i, container := range daemonSet.Spec.Template.Spec.Containers {
 		for _, rec := range recommendations {
 			if container.Name == rec.ContainerName {
+				if daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests == nil {
+					daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests = corev1.ResourceList{}
+				}
+				if daemonSet.Spec.Template.Spec.Containers[i].Resources.Limits == nil {
+					daemonSet.Spec.Template.Spec.Containers[i].Resources.Limits = corev1.ResourceList{}
+				}
 				daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceCPU] = *rec.RecommendedCPU
 				daemonSet.Spec.Template.Spec.Containers[i].Resources.Requests[corev1.ResourceMemory] = *rec.RecommendedMemory
 				daemonSet.Spec.Template.Spec.Containers[i].Resources.Limits[corev1.ResourceCPU] = *rec.RecommendedCPU
@@ -457,6 +479,10 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 					recMemory = float64(memoryRequest.Value())
 				}
 			}
+
+			// Round up the recommended memory to the nearest power of 2
+			recMemory = roundUpToPowerOfTwo(recMemory)
+
 			recommendedCPU := resource.NewMilliQuantity(int64(recCPU), resource.DecimalSI)
 			recommendedMemory := resource.NewQuantity(int64(recMemory), resource.BinarySI)
 
@@ -487,25 +513,33 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 	return recommendations, nil
 }
 
+func roundUpToPowerOfTwo(value float64) float64 {
+	return math.Pow(2, math.Ceil(math.Log2(value)))
+}
+
 // formatRecommendationsMessage formats the recommendations for a Discord message
 func formatRecommendationsMessage(recommendations []ResourceRecommendation) string {
 	var sb strings.Builder
 	sb.WriteString("**Resource Optimization Recommendations**\n\n")
 
 	// Group recommendations by namespace and pod
-	groupedRecs := make(map[string]map[string][]ResourceRecommendation)
+	groupedRecs := make(map[string]map[string]map[string]ResourceRecommendation)
 	for _, rec := range recommendations {
 		if _, ok := groupedRecs[rec.Namespace]; !ok {
-			groupedRecs[rec.Namespace] = make(map[string][]ResourceRecommendation)
+			groupedRecs[rec.Namespace] = make(map[string]map[string]ResourceRecommendation)
 		}
-		groupedRecs[rec.Namespace][rec.PodName] = append(groupedRecs[rec.Namespace][rec.PodName], rec)
+		if _, ok := groupedRecs[rec.Namespace][rec.PodName]; !ok {
+			groupedRecs[rec.Namespace][rec.PodName] = make(map[string]ResourceRecommendation)
+		}
+		groupedRecs[rec.Namespace][rec.PodName][rec.ContainerName] = rec
 	}
 
+	// Iterate through grouped recommendations
 	for namespace, pods := range groupedRecs {
 		sb.WriteString(fmt.Sprintf("**Namespace:** %s\n", namespace))
-		for podName, recs := range pods {
+		for podName, containers := range pods {
 			sb.WriteString(fmt.Sprintf("Pod: %s\n", podName))
-			for _, rec := range recs {
+			for _, rec := range containers {
 				sb.WriteString(fmt.Sprintf("  [%s] CPU: %s -> %s (Usage: %s) | Mem: %s -> %s (Usage: %s)\n",
 					rec.ContainerName,
 					formatResourceValue(rec.CurrentRequestsCPU),
