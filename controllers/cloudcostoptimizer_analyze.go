@@ -302,8 +302,8 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 				continue
 			}
 
-			if recommendedCPU.Cmp(*cpuRequest) < 0 || recommendedMemory.Cmp(*memoryRequest) < 0 {
-				logger.Info("Recommendation ignored due to lower resource request", "container", container.Name)
+			if recommendedCPU.Cmp(*cpuRequest) > 0 || recommendedMemory.Cmp(*memoryRequest) > 0 {
+				logger.Info("Recommendation ignored due to greater resource request", "container", container.Name)
 				continue
 			}
 
