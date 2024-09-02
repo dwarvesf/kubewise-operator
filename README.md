@@ -11,6 +11,28 @@ Kubewise-operator helps users save costs by dynamically managing cloud resources
 - Integration with Prometheus for metric collection
 - Discord notifications for optimization recommendations
 
+## Roadmap
+
+### Implemented Features
+- [x] Basic CloudCostOptimizer CRD definition
+- [x] Resource analysis based on historical metrics
+- [x] Configurable analysis intervals
+- [x] Ignore specific resources (Deployments, StatefulSets, DaemonSets)
+- [x] Prometheus integration for metric collection
+- [x] Discord notifications for optimization recommendations
+
+### Planned Features
+- [] Cost-saving threshold configuration
+- [ ] Machine learning-based predictive optimization
+- [ ] Integration with cloud-specific cost management APIs
+- [ ] User interface for visualization and manual control
+- [ ] Multi-cluster support
+- [ ] Custom metric support beyond Prometheus
+- [ ] Automated rollback of optimizations if performance degrades
+- [ ] Integration with other notification platforms (Slack, Email, etc.)
+- [ ] Cost allocation and chargeback features
+- [ ] Support for optimizing storage resources
+
 ## Project Structure
 The project follows a standard Kubernetes operator structure:
 
