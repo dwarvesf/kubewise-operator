@@ -4,6 +4,28 @@ This project is designed to provide a Kubernetes operator framework that automat
 ## Description
 Kubewise-operator helps users save costs by dynamically managing cloud resources related to Kubernetes workloads. This operator implements custom resource definitions (CRDs) to extend Kubernetes capabilities, making it easy to optimize workloads on various cloud providers.
 
+## Features
+- Automatic resource optimization based on historical usage metrics
+- Configurable analysis intervals and cost-saving thresholds
+- Support for ignoring specific resources (Deployments, StatefulSets, DaemonSets) from optimization
+- Integration with Prometheus for metric collection
+- Discord notifications for optimization recommendations
+
+## Project Structure
+The project follows a standard Kubernetes operator structure:
+
+- `api/v1alpha1/`: Contains the API definitions for the CloudCostOptimizer CRD
+- `controllers/`: Contains the main logic for the operator
+- `config/`: Contains Kubernetes manifests for deploying the operator
+- `Dockerfile`: Defines the container image for the operator
+- `main.go`: The entry point of the operator
+
+Key files:
+- `api/v1alpha1/cloudcostoptimizer_types.go`: Defines the CloudCostOptimizer CRD
+- `controllers/cloudcostoptimizer_controller.go`: Main reconciliation loop
+- `controllers/cloudcostoptimizer_analyze.go`: Resource analysis and optimization logic
+- `config/samples/optimization_v1alpha1_cloudcostoptimizer.yaml`: Sample CloudCostOptimizer resource
+
 ## Getting Started
 
 ### Prerequisites
@@ -21,7 +43,7 @@ make docker-build docker-push IMG=<some-registry>/kubewise-operator:tag
 
 **NOTE:** This image ought to be published in the personal registry you specified.
 And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+Make sure you have the proper permission to the registry if the above commands don't work.
 
 **Install the CRDs into the cluster:**
 
@@ -46,6 +68,41 @@ kubectl apply -k config/samples/
 ```
 
 >**NOTE**: Ensure that the samples has default values to test it out.
+
+### Configuration
+
+The CloudCostOptimizer custom resource allows you to configure various aspects of the optimization process. Here's an example configuration:
+
+```yaml
+apiVersion: optimization.dwarvesf.com/v1alpha1
+kind: CloudCostOptimizer
+metadata:
+  name: cloudcostoptimizer-sample
+spec:
+  analysisInterval: "1h"
+  targets:
+    - resources: ["pods"]
+      namespaces: ["default", "kube-system"]
+      automateOptimization: false
+      ignoreResources:
+        deployment: ["important-deployment", "critical-app"]
+        statefulSet: ["database"]
+        daemonSet: ["monitoring-agent"]
+  costSavingThreshold: 10
+  prometheusConfig:
+    serverAddress: "http://prometheus-server.monitoring"
+    historicalMetricDuration: 6h
+  discordConfig:
+    webhookURL: "https://discord.com/api/webhooks/your-webhook-url"
+```
+
+This configuration sets up the CloudCostOptimizer to:
+- Analyze resources every hour
+- Target pods in the "default" and "kube-system" namespaces
+- Ignore specific deployments, statefulsets, and daemonsets
+- Set a cost-saving threshold of 10%
+- Use Prometheus for historical metrics
+- Send notifications to Discord
 
 ### To Uninstall
 **Delete the instances (CRs) from the cluster:**
