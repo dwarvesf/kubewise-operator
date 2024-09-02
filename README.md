@@ -22,7 +22,7 @@ Kubewise-operator helps users save costs by dynamically managing cloud resources
 - [x] Discord notifications for optimization recommendations
 
 ### Planned Features
-- [] Cost-saving threshold configuration
+- [ ] Cost-saving threshold configuration
 - [ ] Machine learning-based predictive optimization
 - [ ] Integration with cloud-specific cost management APIs
 - [ ] User interface for visualization and manual control
