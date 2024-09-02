@@ -11,9 +11,14 @@ spec:
     - resources: ["pods"]
       namespaces: ["sentry-*"]
       automateOptimization: true
+      ignoreResources:
+        deployment: ["sentry-web", "sentry-worker"]
+        statefulSet: ["sentry-db"]
     - resources: ["pods"]
       namespaces: ["default", "kube-system"]
       automateOptimization: false
+      ignoreResources:
+        daemonSet: ["kube-proxy", "node-exporter"]
     - resources: ["pods"]
       namespaces: ["*"]
       automateOptimization: false

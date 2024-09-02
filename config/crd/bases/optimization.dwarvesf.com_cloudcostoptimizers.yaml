@@ -87,6 +87,14 @@ spec:
                       description: AutomateOptimization specifies whether to automatically
                         apply optimization recommendations
                       type: boolean
+                    ignoreResources:
+                      additionalProperties:
+                        items:
+                          type: string
+                        type: array
+                      description: IgnoreResources specifies resources to ignore by
+                        their names, grouped by resource type
+                      type: object
                     namespaces:
                       description: Namespaces specifies the list of namespaces to
                         monitor

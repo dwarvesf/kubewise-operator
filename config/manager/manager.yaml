@@ -48,6 +48,12 @@ spec:
       #             operator: In
       #             values:
       #               - linux
+      nodeSelector:
+        nodepool: development
+      tolerations:
+      - key: nodepool
+        operator: Equal
+        value: development
       securityContext:
         runAsNonRoot: true
         # TODO(user): For common cases that do not require escalating privileges

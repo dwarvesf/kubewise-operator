@@ -99,6 +99,12 @@ func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target
 
 	// Analyze each pod for potential waste and generate recommendations
 	for _, pod := range podList.Items {
+		// Check if the pod's owner should be ignored
+		if r.shouldIgnoreResource(ctx, &pod, target.IgnoreResources) {
+			logger.Info("Skipping ignored resource", "pod", pod.Name, "namespace", pod.Namespace)
+			continue
+		}
+
 		logger.Info("Analyzing pod", "pod", pod.Name)
 		podRecommendations, err := r.analyzePodResources(ctx, &pod, prometheusClient, duration)
 		if err != nil {
@@ -116,6 +122,51 @@ func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target
 	}
 
 	return recommendations, nil
+}
+
+// shouldIgnoreResource checks if the resource should be ignored based on the IgnoreResources configuration
+func (r *CloudCostOptimizerReconciler) shouldIgnoreResource(ctx context.Context, pod *corev1.Pod, ignoreResources map[string][]string) bool {
+	logger := log.FromContext(ctx)
+
+	for _, ownerRef := range pod.OwnerReferences {
+		switch ownerRef.Kind {
+		case "ReplicaSet":
+			var rs appsv1.ReplicaSet
+			if err := r.Get(ctx, types.NamespacedName{Name: ownerRef.Name, Namespace: pod.Namespace}, &rs); err != nil {
+				logger.Error(err, "Failed to get ReplicaSet", "name", ownerRef.Name)
+				return false
+			}
+			for _, rsOwnerRef := range rs.OwnerReferences {
+				if rsOwnerRef.Kind == "Deployment" {
+					if resourceNames, ok := ignoreResources["deployment"]; ok {
+						for _, name := range resourceNames {
+							if name == rsOwnerRef.Name {
+								return true
+							}
+						}
+					}
+				}
+			}
+		case "StatefulSet":
+			if resourceNames, ok := ignoreResources["statefulSet"]; ok {
+				for _, name := range resourceNames {
+					if name == ownerRef.Name {
+						return true
+					}
+				}
+			}
+		case "DaemonSet":
+			if resourceNames, ok := ignoreResources["daemonSet"]; ok {
+				for _, name := range resourceNames {
+					if name == ownerRef.Name {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // applyOptimization applies the recommended resource changes to the Deployment, StatefulSet, or DaemonSet
@@ -232,6 +283,11 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 			recommendedCPU := resource.NewMilliQuantity(int64(recCPU), resource.DecimalSI)
 			recommendedMemory := resource.NewQuantity(int64(recMemory), resource.BinarySI)
 
+			if recommendedCPU.Cmp(*cpuRequest) == 0 && recommendedMemory.Cmp(*memoryRequest) == 0 {
+				logger.Info("No recommendation needed", "container", container.Name)
+				continue
+			}
+
 			logger.Info("Generating recommendation",
 				"container", container.Name,
 				"currentCPU", cpuRequest.String(),
@@ -264,7 +320,6 @@ func roundUpToPowerOfTwo(value float64) float64 {
 }
 
 // formatRecommendationsMessage formats the recommendations for a Discord message
-// formatRecommendationsMessage formats the recommendations for a Discord message
 func formatRecommendationsMessage(recommendations []ResourceRecommendation) string {
 	var sb strings.Builder
 	sb.WriteString("**Resource Optimization Recommendations**\n\n")
@@ -283,7 +338,20 @@ func formatRecommendationsMessage(recommendations []ResourceRecommendation) stri
 
 	// Iterate through grouped recommendations
 	for namespace, pods := range groupedRecs {
-		sb.WriteString(fmt.Sprintf("**Namespace:** %s\n", namespace))
+		autoAdjust := ""
+		// Check if all recommendations in the namespace are automated
+		for _, containers := range pods {
+			for _, rec := range containers {
+				if rec.AutomateOptimization {
+					autoAdjust = " (Auto-adjusted)"
+					break
+				}
+			}
+			if autoAdjust != "" {
+				break
+			}
+		}
+		sb.WriteString(fmt.Sprintf("**Namespace:** %s%s\n", namespace, autoAdjust))
 		for podName, containers := range pods {
 			sb.WriteString(fmt.Sprintf("Pod: %s\n", podName))
 			for _, rec := range containers {

@@ -32,6 +32,7 @@ type ResourceRecommendation struct {
 	UsageMemory           *resource.Quantity
 	CurrentRequestsMemory *resource.Quantity
 	RecommendedMemory     *resource.Quantity
+	AutomateOptimization  bool
 }
 
 //+kubebuilder:rbac:groups=optimization.dwarvesf.com,resources=cloudcostoptimizers,verbs=get;list;watch;create;update;patch;delete
@@ -83,6 +84,11 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if err != nil {
 			logger.Error(err, "Failed to analyze target", "target", target)
 			continue
+		}
+		if target.AutomateOptimization {
+			for i, _ := range targetRecommendations {
+				targetRecommendations[i].AutomateOptimization = true
+			}
 		}
 		allRecommendations = append(allRecommendations, targetRecommendations...)
 	}

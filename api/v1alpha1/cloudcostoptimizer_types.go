@@ -43,6 +43,12 @@ type Target struct {
 	// AutomateOptimization specifies whether to automatically apply optimization recommendations
 	// +optional
 	AutomateOptimization bool `json:"automateOptimization,omitempty"`
+
+	// IgnoreResources specifies resources to ignore by their names, grouped by resource type
+	// +optional
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:validation:AdditionalProperties=true
+	IgnoreResources map[string][]string `json:"ignoreResources,omitempty"`
 }
 
 // PrometheusConfig defines the configuration for Prometheus
