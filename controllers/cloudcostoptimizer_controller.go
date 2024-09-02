@@ -80,7 +80,7 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Iterate through each target
 	for _, target := range cloudCostOptimizer.Spec.Targets {
-		targetRecommendations, err := r.analyzeTarget(ctx, target, prometheusClient, cloudCostOptimizer.Spec.PrometheusConfig.HistoricalMetricDuration.Duration)
+		targetRecommendations, err := r.analyzeTarget(ctx, cloudCostOptimizer, target, prometheusClient, cloudCostOptimizer.Spec.PrometheusConfig.HistoricalMetricDuration.Duration)
 		if err != nil {
 			logger.Error(err, "Failed to analyze target", "target", target)
 			continue

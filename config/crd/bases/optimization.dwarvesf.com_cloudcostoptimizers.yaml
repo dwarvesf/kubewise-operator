@@ -77,6 +77,13 @@ spec:
                 - historicalMetricDuration
                 - serverAddress
                 type: object
+              recommendationThreshold:
+                description: RecommendationThreshold specifies the minimum percentage
+                  difference between current and recommended resources to generate
+                  a recommendation
+                maximum: 100
+                minimum: 0
+                type: integer
               targets:
                 description: Targets specifies the resources to analyze and optimize
                 items:
