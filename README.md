@@ -29,10 +29,33 @@ Key files:
 ## Getting Started
 
 ### Prerequisites
-- go version v1.21.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Go version v1.21.0+ (https://golang.org/doc/install)
+- Docker version 17.03+ (https://docs.docker.com/get-docker/)
+- kubectl version v1.11.3+ (https://kubernetes.io/docs/tasks/tools/)
+- Access to a Kubernetes v1.11.3+ cluster
+- Kubernetes cluster with Prometheus installed (for metric collection)
+- kustomize v3.8.7+ (https://kustomize.io/)
+- Operator SDK v1.28.0+ (https://sdk.operatorframework.io/docs/installation/)
+- A container registry account (e.g., Docker Hub) to store the operator image
+
+Optional:
+- Discord webhook URL (for notifications)
+
+### Development Environment Setup
+1. Install Go, Docker, kubectl, and kustomize using the links provided above.
+2. Install the Operator SDK:
+   ```sh
+   export ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac)
+   export OS=$(uname | awk '{print tolower($0)}')
+   export OPERATOR_SDK_DL_URL=https://github.com/operator-framework/operator-sdk/releases/download/v1.28.0
+   curl -LO ${OPERATOR_SDK_DL_URL}/operator-sdk_${OS}_${ARCH}
+   chmod +x operator-sdk_${OS}_${ARCH} && sudo mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
+   ```
+3. Clone the kubewise-operator repository:
+   ```sh
+   git clone https://github.com/your-org/kubewise-operator.git
+   cd kubewise-operator
+   ```
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -103,6 +126,25 @@ This configuration sets up the CloudCostOptimizer to:
 - Set a cost-saving threshold of 10%
 - Use Prometheus for historical metrics
 - Send notifications to Discord
+
+#### ArgoCD Integration
+
+When using the `automateOptimization` feature with ArgoCD, you need to configure ArgoCD to ignore the changes made by the CloudCostOptimizer. This is because the operator will automatically adjust resource configurations, which may conflict with ArgoCD's sync process.
+
+To configure ArgoCD to ignore these changes, add the following `ignoreDifferences` section to your Application or ApplicationSet:
+
+```yaml
+spec:
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/template/spec/containers/0/resources
+```
+
+This configuration tells ArgoCD to ignore differences in the container resources specification, which is where the CloudCostOptimizer makes its optimizations. You can adjust the `jsonPointers` as needed to match the specific resources you want ArgoCD to ignore.
+
+By applying this configuration, you can ensure that ArgoCD and the CloudCostOptimizer work together harmoniously, allowing the operator to make resource optimizations without triggering unnecessary syncs or conflicts in ArgoCD.
 
 ### To Uninstall
 **Delete the instances (CRs) from the cluster:**
