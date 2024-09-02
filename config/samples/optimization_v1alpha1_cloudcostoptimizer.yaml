@@ -23,6 +23,7 @@ spec:
       namespaces: ["*"]
       automateOptimization: false
   costSavingThreshold: 10
+  recommendationThreshold: 10
   prometheusConfig:
     serverAddress: "http://loki-prometheus-server.monitoring"
     historicalMetricDuration: 6h

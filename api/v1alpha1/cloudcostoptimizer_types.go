@@ -21,6 +21,12 @@ type CloudCostOptimizerSpec struct {
 	// +kubebuilder:validation:Maximum=100
 	CostSavingThreshold int `json:"costSavingThreshold,omitempty"`
 
+	// RecommendationThreshold specifies the minimum percentage difference between current and recommended resources to generate a recommendation
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:validation:Default=10
+	RecommendationThreshold int `json:"recommendationThreshold,omitempty"`
+
 	// PrometheusConfig specifies the configuration for Prometheus
 	// +optional
 	PrometheusConfig PrometheusConfig `json:"prometheusConfig,omitempty"`

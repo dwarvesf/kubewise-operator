@@ -21,7 +21,7 @@ import (
 	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
 )
 
-func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target optimizationv1alpha1.Target, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {
+func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, cco *optimizationv1alpha1.CloudCostOptimizer, target optimizationv1alpha1.Target, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {
 	logger := log.FromContext(ctx)
 	var recommendations []ResourceRecommendation
 
@@ -106,7 +106,7 @@ func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, target
 		}
 
 		logger.Info("Analyzing pod", "pod", pod.Name)
-		podRecommendations, err := r.analyzePodResources(ctx, &pod, prometheusClient, duration)
+		podRecommendations, err := r.analyzePodResources(ctx, cco, &pod, prometheusClient, duration)
 		if err != nil {
 			logger.Error(err, "Failed to analyze pod", "pod", pod.Name)
 			continue
@@ -212,7 +212,7 @@ func hashRecommendations(recommendations []ResourceRecommendation) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, pod *corev1.Pod, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {
+func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, cco *optimizationv1alpha1.CloudCostOptimizer, pod *corev1.Pod, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {
 	logger := log.FromContext(ctx)
 
 	if isJobPod, jobType := isPodCreatedByJobOrCronJob(pod); isJobPod {
@@ -231,6 +231,11 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 			minCPU    = 50               // minimum CPU recommendation in milli-cores (50m)
 			minMemory = 64 * 1024 * 1024 // minimum Memory recommendation in bytes (64Mi)
 		)
+
+		threshold := cco.Spec.RecommendationThreshold
+		if threshold == 0 {
+			threshold = 10 // Default to 10% if not specified
+		}
 
 		cpuUsage, err := r.getHistoricalMetric(ctx, pod, "container_cpu_usage_seconds_total", prometheusClient, duration)
 		if err != nil {
@@ -282,6 +287,15 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 
 			recommendedCPU := resource.NewMilliQuantity(int64(recCPU), resource.DecimalSI)
 			recommendedMemory := resource.NewQuantity(int64(recMemory), resource.BinarySI)
+
+			// Check if the difference between recommended and current is less than the threshold
+			cpuDiff := math.Abs(float64(recommendedCPU.MilliValue()-cpuRequest.MilliValue())) / float64(cpuRequest.MilliValue()) * 100
+			memDiff := math.Abs(float64(recommendedMemory.Value()-memoryRequest.Value())) / float64(memoryRequest.Value()) * 100
+
+			if cpuDiff < float64(threshold) && memDiff < float64(threshold) {
+				logger.Info("Recommendation ignored due to small difference", "container", container.Name)
+				continue
+			}
 
 			if recommendedCPU.Cmp(*cpuRequest) == 0 && recommendedMemory.Cmp(*memoryRequest) == 0 {
 				logger.Info("No recommendation needed", "container", container.Name)
