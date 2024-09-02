@@ -1,31 +1,25 @@
 apiVersion: optimization.dwarvesf.com/v1alpha1
 kind: CloudCostOptimizer
 metadata:
-  labels:
-    app.kubernetes.io/name: kubewise-operator
-    app.kubernetes.io/managed-by: kustomize
   name: cloudcostoptimizer-sample
 spec:
   analysisInterval: "1h"
   targets:
     - resources: ["pods"]
-      namespaces: ["sentry-*"]
-      automateOptimization: true
-      ignoreResources:
-        deployment: ["sentry-web", "sentry-worker"]
-        statefulSet: ["sentry-db"]
-    - resources: ["pods"]
       namespaces: ["default", "kube-system"]
       automateOptimization: false
       ignoreResources:
-        daemonSet: ["kube-proxy", "node-exporter"]
-    - resources: ["pods"]
-      namespaces: ["*"]
-      automateOptimization: false
+        deployment: ["important-deployment", "critical-app"]
+        statefulSet: ["database"]
+        daemonSet: ["monitoring-agent"]
   costSavingThreshold: 10
   recommendationThreshold: 10
+  oomKilledMemoryIncreasePercentage: 20
+  highCPUUsageThreshold: 90
+  highCPUUsageDuration: "10m"
+  highCPUUsageIncreasePercentage: 20
   prometheusConfig:
-    serverAddress: "http://loki-prometheus-server.monitoring"
+    serverAddress: "http://prometheus-server.monitoring"
     historicalMetricDuration: 6h
   discordConfig:
-    webhookURL: discord_webhook_url
+    webhookURL: "https://discord.com/api/webhooks/your-webhook-url"

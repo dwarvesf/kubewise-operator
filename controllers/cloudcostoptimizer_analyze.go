@@ -11,6 +11,7 @@ import (
 	"time"
 
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/prometheus/common/model"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -262,7 +263,36 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 		recCPU := float64(cpuUsage/1000) * 3
 		recMemory := memoryUsage * 3
 
-		if cpuUsage < float64(cpuRequest.MilliValue())*0.5 || memoryUsage < float64(memoryRequest.Value())*0.5 {
+		// Check for OOMKilled pods
+		isOOMKilled := false
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name == container.Name && status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.Reason == "OOMKilled" {
+				isOOMKilled = true
+				break
+			}
+		}
+
+		if isOOMKilled {
+			increasePercentage := float64(cco.Spec.OOMKilledMemoryIncreasePercentage) / 100
+			recMemory = float64(memoryRequest.Value()) * (1 + increasePercentage)
+			logger.Info("Container was OOMKilled, increasing memory recommendation", "container", container.Name, "increasePercentage", increasePercentage)
+		}
+
+		// Check for high CPU usage
+		highCPUUsageThreshold := float64(cco.Spec.HighCPUUsageThreshold) / 100
+		if cpuUsage/float64(cpuRequest.MilliValue()) >= highCPUUsageThreshold {
+			// Check if high CPU usage persists for the specified duration
+			highCPUDuration, err := r.getHighCPUUsageDuration(ctx, pod, container.Name, prometheusClient, cco.Spec.HighCPUUsageDuration.Duration, highCPUUsageThreshold)
+			if err != nil {
+				logger.Error(err, "Failed to get high CPU usage duration", "container", container.Name)
+			} else if highCPUDuration >= cco.Spec.HighCPUUsageDuration.Duration {
+				increasePercentage := float64(cco.Spec.HighCPUUsageIncreasePercentage) / 100
+				recCPU = float64(cpuRequest.MilliValue()) * (1 + increasePercentage)
+				logger.Info("High CPU usage detected, increasing CPU recommendation", "container", container.Name, "increasePercentage", increasePercentage)
+			}
+		}
+
+		if cpuUsage < float64(cpuRequest.MilliValue())*0.5 || memoryUsage < float64(memoryRequest.Value())*0.5 || isOOMKilled {
 			// Calculate reduced resource requests based on the current usage
 			if int(recCPU) < minCPU {
 				recCPU = minCPU
@@ -292,18 +322,13 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 			cpuDiff := math.Abs(float64(recommendedCPU.MilliValue()-cpuRequest.MilliValue())) / float64(cpuRequest.MilliValue()) * 100
 			memDiff := math.Abs(float64(recommendedMemory.Value()-memoryRequest.Value())) / float64(memoryRequest.Value()) * 100
 
-			if cpuDiff < float64(threshold) && memDiff < float64(threshold) {
+			if cpuDiff < float64(threshold) && memDiff < float64(threshold) && !isOOMKilled {
 				logger.Info("Recommendation ignored due to small difference", "container", container.Name)
 				continue
 			}
 
-			if recommendedCPU.Cmp(*cpuRequest) == 0 && recommendedMemory.Cmp(*memoryRequest) == 0 {
+			if recommendedCPU.Cmp(*cpuRequest) == 0 && recommendedMemory.Cmp(*memoryRequest) == 0 && !isOOMKilled {
 				logger.Info("No recommendation needed", "container", container.Name)
-				continue
-			}
-
-			if recommendedCPU.Cmp(*cpuRequest) > 0 || recommendedMemory.Cmp(*memoryRequest) > 0 {
-				logger.Info("Recommendation ignored due to greater resource request", "container", container.Name)
 				continue
 			}
 
@@ -332,6 +357,65 @@ func (r *CloudCostOptimizerReconciler) analyzePodResources(ctx context.Context, 
 
 	logger.Info("Finished analyzing pod", "pod", pod.Name, "recommendationsCount", len(recommendations))
 	return recommendations, nil
+}
+
+func (r *CloudCostOptimizerReconciler) getHighCPUUsageDuration(ctx context.Context, pod *corev1.Pod, containerName string, prometheusClient v1.API, duration time.Duration, threshold float64) (time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	end := time.Now()
+	start := end.Add(-duration)
+	step := time.Minute
+
+	query := fmt.Sprintf(
+		"sum(rate(container_cpu_usage_seconds_total{namespace=\"%s\", pod=\"%s\", container=\"%s\"}[5m])) / sum(container_spec_cpu_quota{namespace=\"%s\", pod=\"%s\", container=\"%s\"} / container_spec_cpu_period{namespace=\"%s\", pod=\"%s\", container=\"%s\"}) > %f",
+		pod.Namespace, pod.Name, containerName,
+		pod.Namespace, pod.Name, containerName,
+		pod.Namespace, pod.Name, containerName,
+		threshold,
+	)
+
+	result, warnings, err := prometheusClient.QueryRange(ctx, query, v1.Range{
+		Start: start,
+		End:   end,
+		Step:  step,
+	})
+
+	if err != nil {
+		logger.Error(err, "Failed to query Prometheus", "query", query)
+		return 0, err
+	}
+
+	if len(warnings) > 0 {
+		logger.Info("Prometheus query returned warnings", "warnings", warnings)
+	}
+
+	matrix, ok := result.(model.Matrix)
+	if !ok {
+		return 0, fmt.Errorf("unexpected result format: %T", result)
+	}
+
+	if len(matrix) == 0 {
+		return 0, nil
+	}
+
+	// Count consecutive high CPU usage samples
+	var consecutiveHighUsage time.Duration
+	maxConsecutiveHighUsage := time.Duration(0)
+
+	for _, series := range matrix {
+		for _, sample := range series.Values {
+			if sample.Value > 0 {
+				consecutiveHighUsage += step
+				if consecutiveHighUsage > maxConsecutiveHighUsage {
+					maxConsecutiveHighUsage = consecutiveHighUsage
+				}
+			} else {
+				consecutiveHighUsage = 0
+			}
+		}
+	}
+
+	return maxConsecutiveHighUsage, nil
 }
 
 func roundUpToPowerOfTwo(value float64) float64 {

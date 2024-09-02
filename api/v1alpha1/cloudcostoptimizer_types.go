@@ -27,6 +27,29 @@ type CloudCostOptimizerSpec struct {
 	// +kubebuilder:validation:Default=10
 	RecommendationThreshold int `json:"recommendationThreshold,omitempty"`
 
+	// OOMKilledMemoryIncreasePercentage specifies the percentage to increase memory when a pod is OOMKilled
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:validation:Default=20
+	OOMKilledMemoryIncreasePercentage int `json:"oomKilledMemoryIncreasePercentage,omitempty"`
+
+	// HighCPUUsageThreshold specifies the CPU usage percentage threshold to consider as high CPU usage
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:validation:Default=90
+	HighCPUUsageThreshold int `json:"highCPUUsageThreshold,omitempty"`
+
+	// HighCPUUsageDuration specifies the duration for which CPU usage should be high to trigger an increase
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	HighCPUUsageDuration metav1.Duration `json:"highCPUUsageDuration,omitempty"`
+
+	// HighCPUUsageIncreasePercentage specifies the percentage to increase CPU when high CPU usage is detected
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +kubebuilder:validation:Default=20
+	HighCPUUsageIncreasePercentage int `json:"highCPUUsageIncreasePercentage,omitempty"`
+
 	// PrometheusConfig specifies the configuration for Prometheus
 	// +optional
 	PrometheusConfig PrometheusConfig `json:"prometheusConfig,omitempty"`

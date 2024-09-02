@@ -62,6 +62,29 @@ spec:
                 required:
                 - webhookURL
                 type: object
+              highCPUUsageDuration:
+                description: HighCPUUsageDuration specifies the duration for which
+                  CPU usage should be high to trigger an increase
+                format: duration
+                type: string
+              highCPUUsageIncreasePercentage:
+                description: HighCPUUsageIncreasePercentage specifies the percentage
+                  to increase CPU when high CPU usage is detected
+                maximum: 100
+                minimum: 0
+                type: integer
+              highCPUUsageThreshold:
+                description: HighCPUUsageThreshold specifies the CPU usage percentage
+                  threshold to consider as high CPU usage
+                maximum: 100
+                minimum: 0
+                type: integer
+              oomKilledMemoryIncreasePercentage:
+                description: OOMKilledMemoryIncreasePercentage specifies the percentage
+                  to increase memory when a pod is OOMKilled
+                maximum: 100
+                minimum: 0
+                type: integer
               prometheusConfig:
                 description: PrometheusConfig specifies the configuration for Prometheus
                 properties:
