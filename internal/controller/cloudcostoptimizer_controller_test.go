@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
+	optimizationv1alpha1 "github.com/dwarvesf/kubewise-operator/api/v1alpha1"
 )
 
 var _ = Describe("CloudCostOptimizer Controller", func() {

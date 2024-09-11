@@ -34,13 +34,15 @@ type WebhookMessage struct {
 
 // discordServiceImpl implements the DiscordService interface
 type discordServiceImpl struct {
-	WebhookURL string
+	webhookURL string
+	bot        DiscordBot
 }
 
 // NewDiscordService creates a new instance of DiscordService
-func NewDiscordService(webhookURL string) DiscordService {
+func NewDiscordService(webhook, token string) DiscordService {
 	return &discordServiceImpl{
-		WebhookURL: webhookURL,
+		webhookURL: webhook,
+		bot:        NewDiscordBot(token),
 	}
 }
 
@@ -78,7 +80,7 @@ func (d *discordServiceImpl) SendWebhookMessage(webhookURL string, content strin
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
-	resp, err := http.Post(d.WebhookURL, "application/json", bytes.NewBuffer(payload))
+	resp, err := http.Post(d.webhookURL, "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("failed to send webhook message: %w", err)
 	}
@@ -102,7 +104,7 @@ func (d *discordServiceImpl) sendSingleMessage(content string) error {
 		return fmt.Errorf("failed to marshal Discord message: %v", err)
 	}
 
-	resp, err := http.Post(d.WebhookURL, "application/json", bytes.NewBuffer(jsonMessage))
+	resp, err := http.Post(d.webhookURL, "application/json", bytes.NewBuffer(jsonMessage))
 	if err != nil {
 		return fmt.Errorf("failed to send Discord message: %v", err)
 	}
@@ -134,4 +136,9 @@ func splitMessage(content string) []string {
 		content = content[len(chunk):]
 	}
 	return chunks
+}
+
+// DiscordBot returns the Bot implementation
+func (d *discordServiceImpl) Bot() DiscordBot {
+	return d.bot
 }

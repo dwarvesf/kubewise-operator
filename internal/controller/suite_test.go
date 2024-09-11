@@ -32,7 +32,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
+	optimizationv1alpha1 "github.com/dwarvesf/kubewise-operator/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 

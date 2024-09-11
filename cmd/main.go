@@ -34,8 +34,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
-	"github.com/dwarvesf/cloud-cost-optimizer/internal/controller"
+	optimizationv1alpha1 "github.com/dwarvesf/kubewise-operator/api/v1alpha1"
+	"github.com/dwarvesf/kubewise-operator/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 

@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
+	optimizationv1alpha1 "github.com/dwarvesf/kubewise-operator/api/v1alpha1"
 )
 
 // setupPrometheusClient initializes the Prometheus client using the provided configuration

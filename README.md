@@ -61,7 +61,7 @@ Key files:
 - A container registry account (e.g., Docker Hub) to store the operator image
 
 Optional:
-- Discord webhook URL (for notifications)
+- Discord webhook URL and bot token (for notifications)
 
 ### Development Environment Setup
 1. Install Go, Docker, kubectl, and kustomize using the links provided above.
@@ -137,8 +137,10 @@ spec:
   prometheusConfig:
     serverAddress: "http://prometheus-server.monitoring"
     historicalMetricDuration: 6h
-  discordConfig:
-    webhookURL: "https://discord.com/api/webhooks/your-webhook-url"
+  communication:
+    discord:
+      webhookURL: "https://discord.com/api/webhooks/your-webhook-url"
+      botToken: "your-discord-bot-token"
 ```
 
 This configuration sets up the CloudCostOptimizer to:
@@ -147,7 +149,7 @@ This configuration sets up the CloudCostOptimizer to:
 - Ignore specific deployments, statefulsets, and daemonsets
 - Set a cost-saving threshold of 10%
 - Use Prometheus for historical metrics
-- Send notifications to Discord
+- Send notifications to Discord using both a webhook URL and a bot token
 
 #### ArgoCD Integration
 

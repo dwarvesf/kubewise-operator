@@ -54,9 +54,19 @@ type CloudCostOptimizerSpec struct {
 	// +optional
 	PrometheusConfig PrometheusConfig `json:"prometheusConfig,omitempty"`
 
-	// DiscordConfig specifies the configuration for Discord notifications
+	// Communication specifies the configuration for Discord notifications
 	// +optional
-	DiscordConfig DiscordConfig `json:"discordConfig,omitempty"`
+	Communication Communication `json:"communication,omitempty"`
+
+	// GPT specifies the configuration for AI
+	// +optional
+	GPT GPT `json:"gpt,omitempty"`
+}
+
+type GPT struct {
+	// OpenAIKey is the OpenAI API key for AI-based recommendations
+	// +kubebuilder:validation:Required
+	OpenAIKey string `json:"openAIKey"`
 }
 
 // Target defines the resources and namespaces to analyze and optimize
@@ -93,11 +103,20 @@ type PrometheusConfig struct {
 	HistoricalMetricDuration metav1.Duration `json:"historicalMetricDuration"`
 }
 
+type Communication struct {
+	// Discord specifies the configuration for Discord notifications
+	// +kubebuilder:validation:Required
+	Discord DiscordConfig `json:"discord"`
+}
+
 // DiscordConfig defines the configuration for Discord notifications
 type DiscordConfig struct {
 	// WebhookURL is the Discord webhook URL for sending notifications
 	// +kubebuilder:validation:Required
 	WebhookURL string `json:"webhookURL"`
+	// BotToken is the Discord bot token for sending notifications
+	// +kubebuilder:validation:Required
+	BotToken string `json:"botToken"`
 }
 
 // CloudCostOptimizerStatus defines the observed state of CloudCostOptimizer

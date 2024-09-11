@@ -21,5 +21,9 @@ spec:
   prometheusConfig:
     serverAddress: "http://prometheus-server.monitoring"
     historicalMetricDuration: 6h
-  discordConfig:
-    webhookURL: "https://discord.com/api/webhooks/your-webhook-url"
+  communication:
+    discord:
+      webhookURL: "https://discord.com/api/webhooks/your-webhook-url"
+      botToken: "your-discord-bot-token"
+  gpt:
+    openAIKey: AIzaSyDd8V

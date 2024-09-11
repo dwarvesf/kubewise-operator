@@ -45,22 +45,42 @@ spec:
                   analysis
                 format: duration
                 type: string
+              communication:
+                description: Communication specifies the configuration for Discord
+                  notifications
+                properties:
+                  discord:
+                    description: Discord specifies the configuration for Discord notifications
+                    properties:
+                      botToken:
+                        description: BotToken is the Discord bot token for sending
+                          notifications
+                        type: string
+                      webhookURL:
+                        description: WebhookURL is the Discord webhook URL for sending
+                          notifications
+                        type: string
+                    required:
+                    - botToken
+                    - webhookURL
+                    type: object
+                required:
+                - discord
+                type: object
               costSavingThreshold:
                 description: CostSavingThreshold specifies the minimum cost saving
                   percentage to trigger an action
                 maximum: 100
                 minimum: 0
                 type: integer
-              discordConfig:
-                description: DiscordConfig specifies the configuration for Discord
-                  notifications
+              gpt:
+                description: GPT specifies the configuration for AI
                 properties:
-                  webhookURL:
-                    description: WebhookURL is the Discord webhook URL for sending
-                      notifications
+                  openAIKey:
+                    description: OpenAIKey is the OpenAI API key for AI-based recommendations
                     type: string
                 required:
-                - webhookURL
+                - openAIKey
                 type: object
               highCPUUsageDuration:
                 description: HighCPUUsageDuration specifies the duration for which

@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	optimizationv1alpha1 "github.com/dwarvesf/cloud-cost-optimizer/api/v1alpha1"
+	optimizationv1alpha1 "github.com/dwarvesf/kubewise-operator/api/v1alpha1"
 )
 
 func (r *CloudCostOptimizerReconciler) analyzeTarget(ctx context.Context, cco *optimizationv1alpha1.CloudCostOptimizer, target optimizationv1alpha1.Target, prometheusClient v1.API, duration time.Duration) ([]ResourceRecommendation, error) {

@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/dwarvesf/cloud-cost-optimizer/test/utils"
+	"github.com/dwarvesf/kubewise-operator/test/utils"
 )
 
 const namespace = "kubewise-operator-system"

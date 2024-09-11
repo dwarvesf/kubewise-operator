@@ -137,6 +137,14 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
+.PHONY: dev
+dev: manifests generate fmt vet ## Run a controller from your host.
+	@version=$$(uuidgen | tr -d '-') && \
+	echo "Building Docker image with version: $$version" && \
+	make docker-build IMG=kubewise-operator:$$version && \
+	make deploy IMG=kubewise-operator:$$version
+
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
