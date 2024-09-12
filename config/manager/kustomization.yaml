@@ -4,8 +4,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
 - name: controller
-  newName: kubewise-operator
-  newTag: D3FA8920039D4858AB0FBAF9167A6889
+  newName: asia-southeast1-docker.pkg.dev/df-infrastructure/kubewise-operator/operator
+  newTag: v0.7.1
 patches:
 - path: image-pull-secret-patch.yaml
   target:

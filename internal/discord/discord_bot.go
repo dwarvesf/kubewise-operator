@@ -2,7 +2,6 @@
 package discord
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,7 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/olekukonko/tablewriter"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/dwarvesf/kubewise-operator/internal/gpt"
@@ -110,9 +109,28 @@ func (db *dcBot) AddHandler(handler func(s *discordgo.Session, m *discordgo.Mess
 	db.handler = handler
 }
 
+type Response struct {
+	Query             string `json:"query"`
+	Response          string `json:"response"`
+	ResourcesAnalyzed []struct {
+		Name      string `json:"name"`
+		Type      string `json:"type"`
+		Namespace string `json:"namespace"`
+		Age       string `json:"age"`
+		Status    string `json:"status"`
+		Metadata  struct {
+			IP   string `json:"ip"`
+			Node string `json:"node"`
+		} `json:"metadata"`
+	} `json:"resources_analyzed"`
+	Recommendations []string `json:"recommendations"`
+	Errors          []any    `json:"errors"`
+}
+
 func (db *dcBot) ProcessCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd string) {
 	// Split the command into individual words
 	words := strings.Split(cmd, " ")
+
 	if len(words) == 1 {
 		// Handle single-word commands
 		switch words[0] {
@@ -124,372 +142,276 @@ func (db *dcBot) ProcessCommand(s *discordgo.Session, m *discordgo.MessageCreate
 		return
 	}
 
+	if len(words) >= 2 {
+		switch words[0] {
+		case "restart":
+			db.RestartPodCommand(s, m, cmd)
+			return
+		}
+	}
+
+	resources, err := db.getAllResources()
+	if err != nil {
+		db.SendMessage(m.ChannelID, fmt.Sprintf("Error getting resources: %v", err))
+		return
+	}
+
+	prompt := fmt.Sprintf(`You are an expert DevOps engineer with extensive knowledge of Kubernetes (K8s). Your task is to analyze Kubernetes resources and respond to user queries about them. You will be provided with all resources in a Kubernetes cluster for analysis. Your responses should be in JSON format.
+
+Here are the Kubernetes resources you have access to:
+
+<k8s_resources>
+%v
+</k8s_resources>
+
+When a user submits a query, analyze the provided Kubernetes resources and formulate a response based on your expertise. Your response should be in the following JSON format:
+
+{
+  "query": "The user's original query",
+  "response": "Your detailed response to the query",
+  "resources_analyzed": ["List of specific resources you analyzed to answer the query in JSON format eg: [{\"name\": \"pod-1\", \"type\": \"Pod\", \"namespace\": \"default\", \"age\": \"2h\", \"status\": \"Running\", \"metadata\": {\"ip\": \"1.2.3.4\"}]"],
+  "recommendations": ["Any recommendations or best practices, if applicable"],
+  "errors": ["Any errors or issues you encountered, if any"]
+}
+
+To process the user's query, follow these steps:
+1. Carefully read and understand the user's query.
+2. Identify the relevant Kubernetes resources that need to be analyzed to answer the query.
+3. Analyze the identified resources and extract the necessary information.
+4. Formulate a clear and concise response that directly addresses the user's query.
+5. If applicable, provide recommendations or best practices related to the query.
+6. If you encounter any errors or issues while processing the query, include them in the "errors" field.
+7. Response should be in text, DON'T inlcude any quotes in the response.
+
+Here are some examples of possible queries and how you should structure your responses:
+
+Query: "How many pods are running in the default namespace?"
+Response:
+{
+  "query": "How many pods are running in the default namespace?",
+  "response": "There are 5 pods running in the default namespace.",
+  "resources_analyzed": ["pods in default namespace"],
+  "recommendations": ["Consider using namespaces to organize and isolate your resources for better management."],
+  "errors": []
+}
+
+Query: "What is the CPU usage of the nginx deployment?"
+Response:
+{
+  "query": "What is the CPU usage of the nginx deployment?",
+  "response": "The nginx deployment is currently using 250m CPU across its 3 replicas.",
+  "resources_analyzed": ["nginx deployment", "pods in nginx deployment"],
+  "recommendations": ["Monitor CPU usage regularly and consider setting resource limits and requests for better resource management."],
+  "errors": []
+}
+
+If you encounter a query that cannot be answered with the provided Kubernetes resources or requires information outside of your knowledge base, respond with an appropriate error message in the "errors" field.
+
+Remember to always provide accurate and helpful information based on the given Kubernetes resources. Do not make assumptions about resources or configurations that are not explicitly provided in the {{K8S_RESOURCES}}.
+
+Now, please analyze the Kubernetes resources and respond to the following user query:
+
+<user_query>
+{{USER_QUERY}}
+</user_query>
+
+Provide your response in the specified JSON format.`, resources)
+	log.Printf("resources: %v", resources)
+
 	// Handle multi-word commands
-	k8sCmdStr, err := db.gpt.QueryToCommand(cmd)
+	resp, err := db.gpt.Request(prompt, cmd)
 	if err != nil {
 		db.SendMessage(m.ChannelID, fmt.Sprintf("Error processing command: %v", err))
 		return
 	}
-	log.Printf("Kubernetes command string: %s", k8sCmdStr)
-	k8sCmdStr = strings.ReplaceAll(k8sCmdStr, "`", "")
-
-	var k8sCmd K8sCommand
-	err = json.Unmarshal([]byte(k8sCmdStr), &k8sCmd)
-	if err != nil {
-		db.SendMessage(m.ChannelID, fmt.Sprintf("Error parsing Kubernetes command: %v", err))
-		return
+	log.Printf("GPT response: %s", resp)
+	if strings.Contains(resp, "```json") {
+		resp = strings.ReplaceAll(resp, "```json", "")
+		resp = strings.ReplaceAll(resp, "```", "")
 	}
-	log.Printf("Kubernetes command: %+v", k8sCmd)
 
-	// Execute the Kubernetes command
-	result, err := db.executeK8sCommand(k8sCmd)
-	if err != nil {
-		db.SendMessage(m.ChannelID, fmt.Sprintf("Error executing Kubernetes command: %v", err))
+	var response Response
+	if err := json.Unmarshal([]byte(resp), &response); err != nil {
+		db.SendMessage(m.ChannelID, fmt.Sprintf("Error parsing GPT response: %v", err))
 		return
 	}
 
-	// Send the result back to the user
-	db.SendMessage(m.ChannelID, result)
-}
+	// use table writer to format the resources analyzed
+	tableString := &strings.Builder{}
+	table := tablewriter.NewWriter(tableString)
 
-func (db *dcBot) executeK8sCommand(cmd K8sCommand) (string, error) {
-	ctx := context.Background()
+	// Flags to track which headers need to be set
+	podHeaderSet := false
+	namespaceHeaderSet := false
 
-	options := commandOptions{
-		namespace:     cmd.Namespace,
-		labelSelector: strings.Join(cmd.LabelSelector, ","),
-		fieldSelector: strings.Join(cmd.FieldSelector, ","),
-		allNamespaces: cmd.AllNamespaces,
+	for _, res := range response.ResourcesAnalyzed {
+		if res.Type == "Pod" {
+			// Set the header for Pod if not already set
+			if !podHeaderSet {
+				table.SetHeader([]string{"Name", "Namespace", "Status", "IP", "Age"})
+				podHeaderSet = true
+			}
+			table.Append([]string{res.Name, res.Namespace, res.Status, res.Metadata.IP, res.Age})
+		} else if res.Type == "Namespace" {
+			// Set the header for Namespace if not already set
+			if !namespaceHeaderSet {
+				table.SetHeader([]string{"Name", "Age"})
+				namespaceHeaderSet = true
+			}
+			table.Append([]string{res.Name, res.Age})
+		}
 	}
 
-	switch cmd.Operation {
-	case "get":
-		return db.getResource(ctx, cmd.Resource, options)
-	case "describe":
-		return db.describeResource(ctx, cmd.Resource, options)
-	case "delete":
-		return db.deleteResource(ctx, cmd.Resource, options)
-	default:
-		return "", fmt.Errorf("unsupported operation: %s", cmd.Operation)
-	}
-}
+	// Render the table only if there are rows added for either type
+	if podHeaderSet || namespaceHeaderSet {
+		table.Render()
 
-type commandOptions struct {
-	namespace     string
-	name          string
-	fieldSelector string
-	labelSelector string
-	allNamespaces bool
-}
-
-func (db *dcBot) getResource(ctx context.Context, resource string, options commandOptions) (string, error) {
-	switch resource {
-	case "pods", "pod":
-		return db.getPods(ctx, options)
-	case "services", "service":
-		return db.getServices(ctx, options)
-	case "nodes", "node":
-		return db.getNodes(ctx, options)
-	case "namespace", "namespaces":
-		return db.getNamespaces(ctx)
-	default:
-		return "", fmt.Errorf("unsupported resource type: %s", resource)
+		// Send the result back to the user
+		db.SendMessage(m.ChannelID, fmt.Sprintf("%s:\n```\n%s\n```", response.Response, tableString.String()))
+	} else {
+		// Handle the case when no relevant resources were found
+		db.SendMessage(m.ChannelID, "No resources of type 'Pod' or 'Namespace' found.")
 	}
 }
 
-func (db *dcBot) getNamespaces(ctx context.Context) (string, error) {
+// Helper function to convert duration to human-readable format
+func humanReadableDuration(d time.Duration) string {
+	// Calculate days, hours, minutes, and seconds from the duration
+	days := d / (24 * time.Hour)
+	d -= days * (24 * time.Hour)
+
+	hours := d / time.Hour
+	d -= hours * time.Hour
+
+	minutes := d / time.Minute
+	d -= minutes * time.Minute
+
+	// Build the human-readable format
+	var result string
+	if days > 0 {
+		result += fmt.Sprintf("%dd ", days)
+	}
+	if hours > 0 {
+		result += fmt.Sprintf("%dh ", hours)
+	}
+	if days == 0 && hours == 0 {
+		if minutes > 0 {
+			result += fmt.Sprintf("%dm ", minutes)
+		}
+	}
+	if days == 0 && hours == 0 && minutes == 0 {
+		seconds := d / time.Second
+		if seconds > 0 || result == "" { // Show seconds even if they're zero when nothing else is shown
+			result += fmt.Sprintf("%ds", seconds)
+		}
+	}
+
+	return result
+}
+
+type resource struct {
+	Name      string            `json:"name"`
+	Type      string            `json:"type"`
+	Namespace string            `json:"namespace"`
+	Age       string            `json:"age"`
+	Status    string            `json:"status"`
+	Metadata  map[string]string `json:"metadata"`
+}
+
+// Function to fetch and return all resources as a formatted string
+func (db *dcBot) getAllResources() (string, error) {
+	var resources []resource
 	var namespaceList corev1.NamespaceList
-	if err := db.k8sClient.List(ctx, &namespaceList); err != nil {
+	if err := db.k8sClient.List(context.Background(), &namespaceList); err != nil {
 		return "", err
 	}
-	if len(namespaceList.Items) == 0 {
-		return "No namespaces found in the cluster", nil
-	}
-
-	buf := &bytes.Buffer{}
-	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"Name", "Status", "Age"})
-
 	for _, ns := range namespaceList.Items {
-		age := time.Since(ns.CreationTimestamp.Time).Round(time.Second).String()
-		table.Append([]string{ns.Name, string(ns.Status.Phase), age})
+		resources = append(resources, resource{
+			Name:      ns.Name,
+			Type:      "Namespace",
+			Namespace: "",
+			Age:       time.Since(ns.CreationTimestamp.Time).Round(time.Second).String(),
+			Metadata:  map[string]string{},
+		})
 	}
-	table.Render()
 
-	return fmt.Sprintf("Namespaces in the cluster:\n```\n%s\n```", buf.String()), nil
-}
-
-func (db *dcBot) getPods(ctx context.Context, options commandOptions) (string, error) {
+	// Fetch and list Pods
 	listOptions := &client.ListOptions{}
-
-	if !options.allNamespaces {
-		listOptions.Namespace = options.namespace
-	}
-
-	if options.labelSelector != "" {
-		labelSelector, err := labels.Parse(options.labelSelector)
-		if err != nil {
-			return "", fmt.Errorf("invalid label selector: %v", err)
-		}
-		listOptions.LabelSelector = labelSelector
-	}
-
-	var podList corev1.PodList
-	if err := db.k8sClient.List(ctx, &podList, listOptions); err != nil {
+	var pods corev1.PodList
+	if err := db.k8sClient.List(context.Background(), &pods, listOptions); err != nil {
 		return "", err
 	}
-	if len(podList.Items) == 0 {
-		return fmt.Sprintf("No pods found in %s", options.namespace), nil
-	}
-
-	// Manual filtering for field selectors
-	filteredPods := filterPods(podList.Items, options.fieldSelector)
-
-	buf := &bytes.Buffer{}
-	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"Name", "Namespace", "Status", "Node", "Age"})
-
-	for _, pod := range filteredPods {
-		age := time.Since(pod.CreationTimestamp.Time).Round(time.Second).String()
-		table.Append([]string{pod.Name, pod.Namespace, string(pod.Status.Phase), pod.Spec.NodeName, age})
-	}
-	table.Render()
-
-	if options.allNamespaces {
-		return fmt.Sprintf("Pods in all namespaces:\n```\n%s\n```", buf.String()), nil
-	}
-	return fmt.Sprintf("Pods in namespace %s:\n```\n%s\n```", options.namespace, buf.String()), nil
-}
-
-func (db *dcBot) getServices(ctx context.Context, options commandOptions) (string, error) {
-	listOptions := &client.ListOptions{}
-
-	if !options.allNamespaces {
-		listOptions.Namespace = options.namespace
-	}
-
-	if options.labelSelector != "" {
-		labelSelector, err := labels.Parse(options.labelSelector)
-		if err != nil {
-			return "", fmt.Errorf("invalid label selector: %v", err)
-		}
-		listOptions.LabelSelector = labelSelector
-	}
-
-	var serviceList corev1.ServiceList
-	if err := db.k8sClient.List(ctx, &serviceList, listOptions); err != nil {
-		return "", err
-	}
-
-	buf := &bytes.Buffer{}
-	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"Name", "Namespace", "Type", "ClusterIP", "External IP", "Ports", "Age"})
-
-	for _, service := range serviceList.Items {
-		age := time.Since(service.CreationTimestamp.Time).Round(time.Second).String()
+	for _, pod := range pods.Items {
+		age := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+		// fetch node external ip (if any) from node name
 		externalIP := "<none>"
-		if len(service.Status.LoadBalancer.Ingress) > 0 {
-			externalIP = service.Status.LoadBalancer.Ingress[0].IP
+		if pod.Spec.NodeName != "" {
+			var node corev1.Node
+			if err := db.k8sClient.Get(context.Background(), client.ObjectKey{Name: pod.Spec.NodeName}, &node); err == nil {
+				for _, address := range node.Status.Addresses {
+					if address.Type == corev1.NodeExternalIP {
+						externalIP = address.Address
+						break
+					}
+				}
+			}
 		}
-		ports := []string{}
-		for _, port := range service.Spec.Ports {
-			ports = append(ports, fmt.Sprintf("%d/%s", port.Port, port.Protocol))
-		}
-		table.Append([]string{
-			service.Name,
-			service.Namespace,
-			string(service.Spec.Type),
-			service.Spec.ClusterIP,
-			externalIP,
-			strings.Join(ports, ", "),
-			age,
+		resources = append(resources, resource{
+			Name:      pod.Name,
+			Type:      "Pod",
+			Namespace: pod.Namespace,
+			Age:       humanReadableDuration(age),
+			Status:    string(pod.Status.Phase),
+			Metadata:  map[string]string{"ip": externalIP, "node": pod.Spec.NodeName},
 		})
 	}
-	table.Render()
 
-	if options.allNamespaces {
-		return fmt.Sprintf("Services in all namespaces:\n```\n%s\n```", buf.String()), nil
-	}
-	return fmt.Sprintf("Services in namespace %s:\n```\n%s\n```", options.namespace, buf.String()), nil
-}
+	// Fetch and list Deployments
+	// deployments, err := db.k8sClient.AppsV1().Deployments("").List(context.TODO(), metav1.ListOptions{})
+	// if err != nil {
+	// 	return "", fmt.Errorf("error listing Deployments: %v", err)
+	// }
+	// result.WriteString("\nDeployments:\n")
+	// for _, deployment := range deployments.Items {
+	// 	result.WriteString(fmt.Sprintf("Namespace: %s, Name: %s\n", deployment.Namespace, deployment.Name))
+	// }
 
-func (db *dcBot) getNodes(ctx context.Context, options commandOptions) (string, error) {
-	var nodeList corev1.NodeList
-	if err := db.k8sClient.List(ctx, &nodeList); err != nil {
+	// Fetch and list Services
+	// services, err := db.k8sClient.CoreV1().Services("").List(context.TODO(), metav1.ListOptions{})
+	// if err != nil {
+	// 	return "", fmt.Errorf("error listing Services: %v", err)
+	// }
+	// result.WriteString("\nServices:\n")
+	// for _, service := range services.Items {
+	// 	result.WriteString(fmt.Sprintf("Namespace: %s, Name: %s\n", service.Namespace, service.Name))
+	// }
+	// marshal the resources to JSON
+	result, err := json.Marshal(resources)
+	if err != nil {
 		return "", err
 	}
 
-	buf := &bytes.Buffer{}
-	table := tablewriter.NewWriter(buf)
-	table.SetHeader([]string{"Name", "Status", "Roles", "Age", "Version"})
-
-	for _, node := range nodeList.Items {
-		age := time.Since(node.CreationTimestamp.Time).Round(time.Second).String()
-		table.Append([]string{
-			node.Name,
-			getNodeStatus(node),
-			getNodeRoles(node),
-			age,
-			node.Status.NodeInfo.KubeletVersion,
-		})
-	}
-	table.Render()
-
-	return fmt.Sprintf("Nodes in the cluster:\n```\n%s\n```", buf.String()), nil
+	return string(result), nil
 }
 
-func filterPods(pods []corev1.Pod, fieldSelector string) []corev1.Pod {
-	if fieldSelector == "" {
-		return pods
+func (db *dcBot) RestartPodCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd string) {
+	// Split the command into individual words
+	words := strings.Split(cmd, " ")
+	pod := words[1]
+	namespace := words[2]
+	if err := db.k8sClient.Delete(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: pod, Namespace: namespace}}); err != nil {
+		db.SendMessage(m.ChannelID, fmt.Sprintf("Error restarting pod: %v", err))
+		return
 	}
-
-	var filteredPods []corev1.Pod
-	for _, pod := range pods {
-		if evaluateFieldSelector(pod, fieldSelector) {
-			filteredPods = append(filteredPods, pod)
-		}
-	}
-	return filteredPods
+	db.SendMessage(m.ChannelID, fmt.Sprintf("Pod %s in namespace %s restarted successfully", pod, namespace))
 }
 
-func evaluateFieldSelector(pod corev1.Pod, fieldSelector string) bool {
-	selectors := strings.Split(fieldSelector, ",")
-	for _, selector := range selectors {
-		parts := strings.Split(selector, " ")
-		if len(parts) != 3 {
-			// Invalid selector format, skip this selector
-			continue
-		}
-
-		field := parts[0]
-		operator := parts[1]
-		value := parts[2]
-
-		switch field {
-		case "status.phase":
-			if !evaluatePhase(string(pod.Status.Phase), operator, value) {
-				return false
-			}
-		case "metadata.name":
-			if !evaluateString(pod.Name, operator, value) {
-				return false
-			}
-		case "metadata.namespace":
-			if !evaluateString(pod.Namespace, operator, value) {
-				return false
-			}
-		case "spec.nodeName":
-			if !evaluateString(pod.Spec.NodeName, operator, value) {
-				return false
-			}
-		case "status.podIP":
-			if !evaluateString(pod.Status.PodIP, operator, value) {
-				return false
-			}
-		case "status.startTime":
-			if pod.Status.StartTime != nil {
-				if !evaluateTime(pod.Status.StartTime.Time, operator, value) {
-					return false
-				}
-			} else if operator != "=" && operator != "==" {
-				return false
-			}
-		default:
-			// Unknown field, skip this selector
-			continue
-		}
-	}
-	return true
+func (db *dcBot) UnknownCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	db.SendMessage(m.ChannelID, "Unknown command. Try using the 'help' command for more information.")
 }
 
-func evaluatePhase(actual, operator, expected string) bool {
-	switch operator {
-	case "=", "==":
-		return actual == expected
-	case "!=":
-		return actual != expected
-	default:
-		return false
-	}
-}
-
-func evaluateString(actual, operator, expected string) bool {
-	switch operator {
-	case "=", "==":
-		return actual == expected
-	case "!=":
-		return actual != expected
-	case "contains":
-		return strings.Contains(actual, expected)
-	case "startswith":
-		return strings.HasPrefix(actual, expected)
-	case "endswith":
-		return strings.HasSuffix(actual, expected)
-	default:
-		return false
-	}
-}
-
-func evaluateTime(actual time.Time, operator, expected string) bool {
-	expectedTime, err := time.Parse(time.RFC3339, expected)
-	if err != nil {
-		return false
-	}
-
-	switch operator {
-	case "=", "==":
-		return actual.Equal(expectedTime)
-	case "!=":
-		return !actual.Equal(expectedTime)
-	case ">":
-		return actual.After(expectedTime)
-	case ">=":
-		return actual.After(expectedTime) || actual.Equal(expectedTime)
-	case "<":
-		return actual.Before(expectedTime)
-	case "<=":
-		return actual.Before(expectedTime) || actual.Equal(expectedTime)
-	default:
-		return false
-	}
-}
-
-func getNodeStatus(node corev1.Node) string {
-	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady {
-			if condition.Status == corev1.ConditionTrue {
-				return "Ready"
-			} else {
-				return "Not Ready"
-			}
-		}
-	}
-	return "Unknown"
-}
-
-func getNodeRoles(node corev1.Node) string {
-	roles := []string{}
-	for label := range node.Labels {
-		if strings.HasPrefix(label, "node-role.kubernetes.io/") {
-			roles = append(roles, strings.TrimPrefix(label, "node-role.kubernetes.io/"))
-		}
-	}
-	if len(roles) == 0 {
-		return "none"
-	}
-	return strings.Join(roles, ", ")
-}
-
-func (db *dcBot) describeResource(ctx context.Context, resource string, options commandOptions) (string, error) {
-	// For simplicity, we'll just return the same information as 'get' for now
-	// In a real-world scenario, you'd want to provide more detailed information
-	return db.getResource(ctx, resource, options)
-}
-
-func (db *dcBot) deleteResource(ctx context.Context, resource string, options commandOptions) (string, error) {
-	// Implement delete logic here
-	// This is a placeholder and should be implemented based on your requirements
-	return fmt.Sprintf("Delete operation for %s in namespace %s is not implemented yet", resource, options.namespace), nil
+func (db *dcBot) SendMessage(channelID string, content string) (*discordgo.Message, error) {
+	return db.s.ChannelMessageSend(channelID, content)
 }
 
 func (db *dcBot) HelpCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -508,12 +430,4 @@ Examples:
 The GPT model will interpret your request and generate the appropriate Kubernetes command.`
 
 	db.SendMessage(m.ChannelID, helpMessage)
-}
-
-func (db *dcBot) UnknownCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	db.SendMessage(m.ChannelID, "Unknown command. Try using the 'help' command for more information.")
-}
-
-func (db *dcBot) SendMessage(channelID string, content string) (*discordgo.Message, error) {
-	return db.s.ChannelMessageSend(channelID, content)
 }
