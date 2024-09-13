@@ -125,25 +125,13 @@ type DiscordConfig struct {
 
 // CloudCostOptimizerStatus defines the observed state of CloudCostOptimizer
 type CloudCostOptimizerStatus struct {
-	// LastAnalysisTime is the timestamp of the last optimization analysis
-	// +optional
-	LastAnalysisTime metav1.Time `json:"lastAnalysisTime,omitempty"`
-
 	// LastReconcileTime is the timestamp of the last reconciliation
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
 
-	// Recommendations contains the latest optimization recommendations
+	// DiscordStatus is the status of the Discord service
 	// +optional
-	Recommendations []string `json:"recommendations,omitempty"`
-
-	// RecommendationsHash contains the hash of the latest optimization recommendations
-	// +optional
-	RecommendationsHash string `json:"recommendationsHash,omitempty"`
-
-	// TotalCostSavings represents the estimated total cost savings
-	// +optional
-	TotalCostSavings string `json:"totalCostSavings,omitempty"`
+	DiscordStatus string `json:"discordStatus,omitempty"`
 }
 
 //+kubebuilder:object:root=true

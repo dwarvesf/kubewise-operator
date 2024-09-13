@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -282,6 +283,13 @@ Provide your response in the specified JSON format.`, resources, string(metadata
 	namespaceHeaderSet := false
 
 	log.Println("processing resources")
+	// sort the resources analyzed by namespace, then by name
+	sort.Slice(response.ResourcesAnalyzed, func(i, j int) bool {
+		if response.ResourcesAnalyzed[i].Namespace == response.ResourcesAnalyzed[j].Namespace {
+			return response.ResourcesAnalyzed[i].Name < response.ResourcesAnalyzed[j].Name
+		}
+		return response.ResourcesAnalyzed[i].Namespace < response.ResourcesAnalyzed[j].Namespace
+	})
 	for _, res := range response.ResourcesAnalyzed {
 		if res.Type == "Pod" {
 			// Set the header for Pod if not already set

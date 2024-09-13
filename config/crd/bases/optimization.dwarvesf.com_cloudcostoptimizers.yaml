@@ -174,27 +174,12 @@ spec:
           status:
             description: CloudCostOptimizerStatus defines the observed state of CloudCostOptimizer
             properties:
-              lastAnalysisTime:
-                description: LastAnalysisTime is the timestamp of the last optimization
-                  analysis
-                format: date-time
+              discordStatus:
+                description: DiscordStatus is the status of the Discord service
                 type: string
               lastReconcileTime:
                 description: LastReconcileTime is the timestamp of the last reconciliation
                 format: date-time
-                type: string
-              recommendations:
-                description: Recommendations contains the latest optimization recommendations
-                items:
-                  type: string
-                type: array
-              recommendationsHash:
-                description: RecommendationsHash contains the hash of the latest optimization
-                  recommendations
-                type: string
-              totalCostSavings:
-                description: TotalCostSavings represents the estimated total cost
-                  savings
                 type: string
             type: object
         type: object

@@ -59,6 +59,12 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// check if the discord service is already initialized
+	if cloudCostOptimizer.Status.DiscordStatus == "Connected" {
+		logger.Info("Discord service is already connected")
+		return ctrl.Result{}, nil
+	}
+
 	// init the discord service
 	ctx = context.Background()
 	// set metadata to ctx
@@ -67,14 +73,17 @@ func (r *CloudCostOptimizerReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if dc == nil {
 		return ctrl.Result{}, fmt.Errorf("unable to create Discord service: discord service is nil")
 	}
-	if r.Discord == nil {
-		if err := dc.Bot().Open(); err != nil {
-			return ctrl.Result{}, fmt.Errorf("unable to open discord bot: %w", err)
-		}
-		dc.Bot().SetGPT(gpt.NewOpenAI(cloudCostOptimizer.Spec.GPT.OpenAIKey))
-		dc.Bot().SetK8sClient(r.Client)
+	if err := dc.Bot().Open(); err != nil {
+		return ctrl.Result{}, fmt.Errorf("unable to open discord bot: %w", err)
 	}
+	dc.Bot().SetGPT(gpt.NewOpenAI(cloudCostOptimizer.Spec.GPT.OpenAIKey))
+	dc.Bot().SetK8sClient(r.Client)
 
+	// update status
+	cloudCostOptimizer.Status.DiscordStatus = "Connected"
+	if err := r.Status().Update(ctx, cloudCostOptimizer); err != nil {
+		return ctrl.Result{}, fmt.Errorf("unable to update CloudCostOptimizer status: %w", err)
+	}
 	return ctrl.Result{}, nil
 }
 
