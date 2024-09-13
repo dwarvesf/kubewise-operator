@@ -32,15 +32,16 @@ type dcBot struct {
 	gpt       gpt.GPT
 	handler   func(s *discordgo.Session, m *discordgo.MessageCreate)
 	k8sClient client.Client
+	ctx       context.Context
 }
 
-func NewDiscordBot(token string) DiscordBot {
+func NewDiscordBot(ctx context.Context, token string) DiscordBot {
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return &dcBot{s: dg}
+	return &dcBot{s: dg, ctx: ctx}
 }
 
 func (db *dcBot) SetGPT(gpt gpt.GPT) {
@@ -112,6 +113,7 @@ func (db *dcBot) AddHandler(handler func(s *discordgo.Session, m *discordgo.Mess
 type Response struct {
 	Query             string `json:"query"`
 	Response          string `json:"response"`
+	Type              string `json:"type"`
 	ResourcesAnalyzed []struct {
 		Name      string `json:"name"`
 		Type      string `json:"type"`
@@ -119,8 +121,13 @@ type Response struct {
 		Age       string `json:"age"`
 		Status    string `json:"status"`
 		Metadata  struct {
-			IP   string `json:"ip"`
-			Node string `json:"node"`
+			IP           string `json:"ip"`
+			Node         string `json:"node"`
+			RestartCount int    `json:"restart_count"`
+			LastState    struct {
+				StartedAt string `json:"started_at"`
+				Reason    string `json:"reason"`
+			} `json:"last_state"`
 		} `json:"metadata"`
 	} `json:"resources_analyzed"`
 	Recommendations []string `json:"recommendations"`
@@ -150,11 +157,20 @@ func (db *dcBot) ProcessCommand(s *discordgo.Session, m *discordgo.MessageCreate
 		}
 	}
 
+	metadataMap := db.ctx.Value("metadata").(map[string]string)
+	metadata, err := json.Marshal(metadataMap)
+	if err != nil {
+		db.SendMessage(m.ChannelID, fmt.Sprintf("Error parsing metadata: %v", err))
+		return
+	}
+
 	resources, err := db.getAllResources()
 	if err != nil {
 		db.SendMessage(m.ChannelID, fmt.Sprintf("Error getting resources: %v", err))
 		return
 	}
+	log.Println("ressource length: ", len(resources))
+	log.Println("resources: ", resources)
 
 	prompt := fmt.Sprintf(`You are an expert DevOps engineer with extensive knowledge of Kubernetes (K8s). Your task is to analyze Kubernetes resources and respond to user queries about them. You will be provided with all resources in a Kubernetes cluster for analysis. Your responses should be in JSON format.
 
@@ -163,6 +179,11 @@ Here are the Kubernetes resources you have access to:
 <k8s_resources>
 %v
 </k8s_resources>
+
+Here are additional information that you can use to answer user queries:
+<additional_info>
+%v
+</additional_info>
 
 When a user submits a query, analyze the provided Kubernetes resources and formulate a response based on your expertise. Your response should be in the following JSON format:
 
@@ -178,10 +199,12 @@ To process the user's query, follow these steps:
 1. Carefully read and understand the user's query.
 2. Identify the relevant Kubernetes resources that need to be analyzed to answer the query.
 3. Analyze the identified resources and extract the necessary information.
+4. Make sure responses are accurate, concise, and won't miss any information in tag <k8s_resources>.
 4. Formulate a clear and concise response that directly addresses the user's query.
 5. If applicable, provide recommendations or best practices related to the query.
 6. If you encounter any errors or issues while processing the query, include them in the "errors" field.
-7. Response should be in text, DON'T inlcude any quotes in the response.
+7. If the question is not about the resources provided, respond with information that is given in the <additional_info> tag and put it into the "response" field, and "type" field is "general".
+8. Response should be in text, DON'T inlcude any quotes in the response.
 
 Here are some examples of possible queries and how you should structure your responses:
 
@@ -191,6 +214,7 @@ Response:
   "query": "How many pods are running in the default namespace?",
   "response": "There are 5 pods running in the default namespace.",
   "resources_analyzed": ["pods in default namespace"],
+  "type": "k8s",
   "recommendations": ["Consider using namespaces to organize and isolate your resources for better management."],
   "errors": []
 }
@@ -201,8 +225,20 @@ Response:
   "query": "What is the CPU usage of the nginx deployment?",
   "response": "The nginx deployment is currently using 250m CPU across its 3 replicas.",
   "resources_analyzed": ["nginx deployment", "pods in nginx deployment"],
+  "type": "k8s",
   "recommendations": ["Monitor CPU usage regularly and consider setting resource limits and requests for better resource management."],
   "errors": []
+}
+
+Query: "What is cluster name?"
+Response:
+{
+  "query": "What is cluster name?",
+  "response": "The cluster name is 'my-cluster'.",
+  "type": "general",
+  "errors": [],
+  "resources_analyzed": [],
+  "recommendations": []
 }
 
 If you encounter a query that cannot be answered with the provided Kubernetes resources or requires information outside of your knowledge base, respond with an appropriate error message in the "errors" field.
@@ -215,17 +251,19 @@ Now, please analyze the Kubernetes resources and respond to the following user q
 {{USER_QUERY}}
 </user_query>
 
-Provide your response in the specified JSON format.`, resources)
-	log.Printf("resources: %v", resources)
+Provide your response in the specified JSON format.`, resources, string(metadata))
+	log.Println("prompt: ", prompt)
 
 	// Handle multi-word commands
+	log.Println("GPT request")
 	resp, err := db.gpt.Request(prompt, cmd)
 	if err != nil {
 		db.SendMessage(m.ChannelID, fmt.Sprintf("Error processing command: %v", err))
 		return
 	}
-	log.Printf("GPT response: %s", resp)
+	log.Printf("GPT responsed")
 	if strings.Contains(resp, "```json") {
+		log.Println("processing response")
 		resp = strings.ReplaceAll(resp, "```json", "")
 		resp = strings.ReplaceAll(resp, "```", "")
 	}
@@ -235,6 +273,7 @@ Provide your response in the specified JSON format.`, resources)
 		db.SendMessage(m.ChannelID, fmt.Sprintf("Error parsing GPT response: %v", err))
 		return
 	}
+	log.Println("response: ", response)
 
 	// use table writer to format the resources analyzed
 	tableString := &strings.Builder{}
@@ -244,14 +283,19 @@ Provide your response in the specified JSON format.`, resources)
 	podHeaderSet := false
 	namespaceHeaderSet := false
 
+	log.Println("processing resources")
 	for _, res := range response.ResourcesAnalyzed {
 		if res.Type == "Pod" {
 			// Set the header for Pod if not already set
 			if !podHeaderSet {
-				table.SetHeader([]string{"Name", "Namespace", "Status", "IP", "Age"})
+				table.SetHeader([]string{"Name", "Namespace", "Status", "Restart", "IP", "Age"})
 				podHeaderSet = true
 			}
-			table.Append([]string{res.Name, res.Namespace, res.Status, res.Metadata.IP, res.Age})
+			restartReason := ""
+			if res.Metadata.LastState.Reason != "" {
+				restartReason = fmt.Sprintf(" (%v)", res.Metadata.LastState.Reason)
+			}
+			table.Append([]string{res.Name, res.Namespace, res.Status, fmt.Sprintf("%v", res.Metadata.RestartCount) + restartReason, res.Metadata.IP, res.Age})
 		} else if res.Type == "Namespace" {
 			// Set the header for Namespace if not already set
 			if !namespaceHeaderSet {
@@ -269,8 +313,14 @@ Provide your response in the specified JSON format.`, resources)
 		// Send the result back to the user
 		db.SendMessage(m.ChannelID, fmt.Sprintf("%s:\n```\n%s\n```", response.Response, tableString.String()))
 	} else {
+		if response.Type == "general" {
+			db.SendMessage(m.ChannelID, response.Response)
+			return
+		}
 		// Handle the case when no relevant resources were found
-		db.SendMessage(m.ChannelID, "No resources of type 'Pod' or 'Namespace' found.")
+		if len(response.ResourcesAnalyzed) == 0 {
+			db.SendMessage(m.ChannelID, "No resources of type 'Pod' or 'Namespace' found.")
+		}
 	}
 }
 
@@ -310,16 +360,17 @@ func humanReadableDuration(d time.Duration) string {
 }
 
 type resource struct {
-	Name      string            `json:"name"`
-	Type      string            `json:"type"`
-	Namespace string            `json:"namespace"`
-	Age       string            `json:"age"`
-	Status    string            `json:"status"`
-	Metadata  map[string]string `json:"metadata"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"`
+	Namespace string                 `json:"namespace"`
+	Age       string                 `json:"age"`
+	Status    string                 `json:"status"`
+	Metadata  map[string]interface{} `json:"metadata"`
 }
 
 // Function to fetch and return all resources as a formatted string
 func (db *dcBot) getAllResources() (string, error) {
+	start := time.Now()
 	var resources []resource
 	var namespaceList corev1.NamespaceList
 	if err := db.k8sClient.List(context.Background(), &namespaceList); err != nil {
@@ -331,7 +382,7 @@ func (db *dcBot) getAllResources() (string, error) {
 			Type:      "Namespace",
 			Namespace: "",
 			Age:       time.Since(ns.CreationTimestamp.Time).Round(time.Second).String(),
-			Metadata:  map[string]string{},
+			Metadata:  map[string]interface{}{},
 		})
 	}
 
@@ -341,6 +392,7 @@ func (db *dcBot) getAllResources() (string, error) {
 	if err := db.k8sClient.List(context.Background(), &pods, listOptions); err != nil {
 		return "", err
 	}
+	namespacePods := make(map[string][]resource)
 	for _, pod := range pods.Items {
 		age := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
 		// fetch node external ip (if any) from node name
@@ -356,35 +408,44 @@ func (db *dcBot) getAllResources() (string, error) {
 				}
 			}
 		}
-		resources = append(resources, resource{
+
+		// Get restart count and last state
+		restartCount := 0
+		var lastState corev1.ContainerState
+		if len(pod.Status.ContainerStatuses) > 0 {
+			restartCount = int(pod.Status.ContainerStatuses[0].RestartCount)
+			lastState = pod.Status.ContainerStatuses[0].LastTerminationState
+		}
+
+		lastStateInfo := map[string]string{
+			"started_at": "",
+			"reason":     "",
+		}
+		if lastState.Terminated != nil {
+			lastStateInfo["started_at"] = lastState.Terminated.StartedAt.String()
+			lastStateInfo["reason"] = lastState.Terminated.Reason
+		}
+
+		namespacePods[pod.Namespace] = append(namespacePods[pod.Namespace], resource{
 			Name:      pod.Name,
 			Type:      "Pod",
 			Namespace: pod.Namespace,
 			Age:       humanReadableDuration(age),
 			Status:    string(pod.Status.Phase),
-			Metadata:  map[string]string{"ip": externalIP, "node": pod.Spec.NodeName},
+			Metadata: map[string]interface{}{
+				"ip":            externalIP,
+				"node":          pod.Spec.NodeName,
+				"restart_count": restartCount,
+				"last_state":    lastStateInfo,
+			},
 		})
 	}
+	// Add the pods to the resources slice
+	for i := range resources {
+		resources[i].Metadata = map[string]interface{}{"pods": namespacePods[resources[i].Name]}
+	}
+	log.Printf("Fetched all resources in %v seconds", time.Since(start).Seconds())
 
-	// Fetch and list Deployments
-	// deployments, err := db.k8sClient.AppsV1().Deployments("").List(context.TODO(), metav1.ListOptions{})
-	// if err != nil {
-	// 	return "", fmt.Errorf("error listing Deployments: %v", err)
-	// }
-	// result.WriteString("\nDeployments:\n")
-	// for _, deployment := range deployments.Items {
-	// 	result.WriteString(fmt.Sprintf("Namespace: %s, Name: %s\n", deployment.Namespace, deployment.Name))
-	// }
-
-	// Fetch and list Services
-	// services, err := db.k8sClient.CoreV1().Services("").List(context.TODO(), metav1.ListOptions{})
-	// if err != nil {
-	// 	return "", fmt.Errorf("error listing Services: %v", err)
-	// }
-	// result.WriteString("\nServices:\n")
-	// for _, service := range services.Items {
-	// 	result.WriteString(fmt.Sprintf("Namespace: %s, Name: %s\n", service.Namespace, service.Name))
-	// }
 	// marshal the resources to JSON
 	result, err := json.Marshal(resources)
 	if err != nil {

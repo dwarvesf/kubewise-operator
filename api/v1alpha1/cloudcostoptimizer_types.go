@@ -61,6 +61,10 @@ type CloudCostOptimizerSpec struct {
 	// GPT specifies the configuration for AI
 	// +optional
 	GPT GPT `json:"gpt,omitempty"`
+
+	// Metadata specifies the metadata for the CloudCostOptimizer instance
+	// +optional
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 type GPT struct {

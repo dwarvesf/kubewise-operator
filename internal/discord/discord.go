@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"golang.org/x/net/context"
 )
 
 const (
@@ -39,10 +41,10 @@ type discordServiceImpl struct {
 }
 
 // NewDiscordService creates a new instance of DiscordService
-func NewDiscordService(webhook, token string) DiscordService {
+func NewDiscordService(ctx context.Context, webhook, token string) DiscordService {
 	return &discordServiceImpl{
 		webhookURL: webhook,
-		bot:        NewDiscordBot(token),
+		bot:        NewDiscordBot(ctx, token),
 	}
 }
 

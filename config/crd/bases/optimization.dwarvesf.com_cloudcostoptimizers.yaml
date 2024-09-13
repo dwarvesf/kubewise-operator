@@ -99,6 +99,12 @@ spec:
                 maximum: 100
                 minimum: 0
                 type: integer
+              metadata:
+                additionalProperties:
+                  type: string
+                description: Metadata specifies the metadata for the CloudCostOptimizer
+                  instance
+                type: object
               oomKilledMemoryIncreasePercentage:
                 description: OOMKilledMemoryIncreasePercentage specifies the percentage
                   to increase memory when a pod is OOMKilled
