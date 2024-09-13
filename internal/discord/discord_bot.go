@@ -151,7 +151,7 @@ func (db *dcBot) ProcessCommand(s *discordgo.Session, m *discordgo.MessageCreate
 
 	if len(words) >= 2 {
 		switch words[0] {
-		case "restart":
+		case "restart", "rs":
 			db.RestartPodCommand(s, m, cmd)
 			return
 		}
@@ -170,7 +170,6 @@ func (db *dcBot) ProcessCommand(s *discordgo.Session, m *discordgo.MessageCreate
 		return
 	}
 	log.Println("ressource length: ", len(resources))
-	log.Println("resources: ", resources)
 
 	prompt := fmt.Sprintf(`You are an expert DevOps engineer with extensive knowledge of Kubernetes (K8s). Your task is to analyze Kubernetes resources and respond to user queries about them. You will be provided with all resources in a Kubernetes cluster for analysis. Your responses should be in JSON format.
 
@@ -261,7 +260,6 @@ Provide your response in the specified JSON format.`, resources, string(metadata
 		db.SendMessage(m.ChannelID, fmt.Sprintf("Error processing command: %v", err))
 		return
 	}
-	log.Printf("GPT responsed")
 	if strings.Contains(resp, "```json") {
 		log.Println("processing response")
 		resp = strings.ReplaceAll(resp, "```json", "")
